@@ -14,6 +14,6 @@ export default class ClientObj extends ModelSource {
 
     override getTempModel(): Model | null {
         const obj = ObjType.list(this.id);
-        return obj.getModelLit(this.count);
+        return obj.getModelLit(true, this.count);
     }
 }

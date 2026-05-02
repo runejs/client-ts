@@ -1,4 +1,5 @@
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
 import Tone from '#/sound/Tone.js';
 
@@ -30,11 +31,22 @@ export default class JagFX {
 
     static generate(id: number, loopCount: number): Packet | null {
         const sound = this.synth[id];
-        if (sound === null) {
+        if (!sound) {
             return null;
         }
 
         return sound.getWave(loopCount);
+    }
+
+    static load(cache: Js5, id: number): JagFX | null {
+        const data = cache.getFile(0, id);
+        return data === null ? null : new JagFX(new Packet(data));
+    }
+
+    constructor(dat?: Packet) {
+        if (dat) {
+            this.load(dat);
+        }
     }
 
     load(dat: Packet): void {

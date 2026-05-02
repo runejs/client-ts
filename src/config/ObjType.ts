@@ -1,7 +1,8 @@
 import LruCache from '#/datastruct/LruCache.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
 
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
 import { Colour } from '#/graphics/Colour.js';
 import Pix2D from '#/graphics/Pix2D.js';
@@ -11,21 +12,19 @@ import Pix32 from '#/graphics/Pix32.js';
 
 import { TypedArray1d } from '#/util/Arrays.js';
 
-export default class ObjType {
+export default class ObjType extends Linkable2 {
     static numDefinitions: number = 0;
-    static idx: Int32Array | null = null;
-    static dat: Packet | null = null;
-    static recent: (ObjType | null)[] | null = null;
-    static recentPos: number = 0;
+    static models: Js5 | null = null;
+    static configClient: Js5 | null = null;
+    static recentUse: LruCache<ObjType> = new LruCache(64);
     static memServer: boolean = true;
     static modelCache: LruCache<Model> = new LruCache(50);
-    static spriteCache: LruCache<Pix32> = new LruCache(200);
+    static spriteCache: LruCache<Pix32> = new LruCache(100);
 
     id: number = -1;
 
     model: number = 0;
     name: string | null = null;
-    desc: string | null = null;
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     zoom2d: number = 2000;
@@ -37,8 +36,8 @@ export default class ObjType {
     stackable: boolean = false;
     cost: number = 1;
     members: boolean = false;
-    op: (string | null)[] | null = null;
-    iop: (string | null)[] | null = null;
+    op: (string | null)[] | null = new TypedArray1d(5, null);
+    iop: (string | null)[] | null = [null, null, null, null, 'Drop'];
     manwear: number = -1;
     manwear2: number = -1;
     manwearOffset: number = 0;
@@ -55,71 +54,77 @@ export default class ObjType {
     countco: Uint16Array | null = null;
     certlink: number = -1;
     certtemplate: number = -1;
-    resizex: number = 0;
-    resizey: number = 0;
-    resizez: number = 0;
+    resizex: number = 128;
+    resizey: number = 128;
+    resizez: number = 128;
     ambient: number = 0;
     contrast: number = 0;
+    team: number = 0;
 
-    static init(config: JagFile, members: boolean): void {
+    static init(config: Js5, members: boolean, models: Js5): void {
+        this.models = models;
         this.memServer = members;
-
-        this.dat = new Packet(config.read('obj.dat'));
-        const idx: Packet = new Packet(config.read('obj.idx'));
-
-        this.numDefinitions = idx.g2();
-        this.idx = new Int32Array(this.numDefinitions);
-
-        let offset: number = 2;
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            this.idx[id] = offset;
-            offset += idx.g2();
-        }
-
-        this.recent = new TypedArray1d(10, null);
-        for (let id: number = 0; id < 10; id++) {
-            this.recent[id] = new ObjType();
-        }
+        this.configClient = config;
+        this.numDefinitions = config.getFileIdLimit(10);
+        this.recentUse.clear();
     }
 
     static list(id: number): ObjType {
-        if (!this.recent || !this.idx || !this.dat) {
+        if (!this.configClient) {
             throw new Error();
         }
 
-        for (let i: number = 0; i < 10; i++) {
-            const type: ObjType | null = this.recent[i];
-            if (type && type.id === id) {
-                return type;
-            }
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
         }
 
-        this.recentPos = (this.recentPos + 1) % 10;
-
-        const obj: ObjType = this.recent[this.recentPos]!;
-        this.dat.pos = this.idx[id];
+        const obj = new ObjType();
         obj.id = id;
         obj.reset();
-        obj.decode(this.dat);
+        const data = this.configClient.getFile(id, 10);
+        if (data) {
+            obj.decode(new Packet(data));
+        }
 
         if (obj.certtemplate !== -1) {
             obj.genCert();
         }
 
         if (!this.memServer && obj.members) {
-            obj.name = 'Members Object';
-            obj.desc = "Login to a members' server to use this object.";
-            obj.op = null;
             obj.iop = null;
+            obj.team = 0;
+            obj.op = null;
+            obj.name = 'Members object';
         }
+        this.recentUse.put(obj, BigInt(id));
 
         return obj;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
+        this.modelCache.clear();
+        this.spriteCache.clear();
+    }
+
+    static resetSpriteCache(): void {
+        this.spriteCache.clear();
+    }
+
+    static invNumber(value: number): string {
+        if (value < 100000) {
+            return value.toString();
+        } else if (value < 10000000) {
+            return `${(value / 1000) | 0}K`;
+        } else {
+            return `${(value / 1000000) | 0}M`;
+        }
     }
 
     private reset(): void {
         this.model = 0;
         this.name = null;
-        this.desc = null;
         this.recol_s = null;
         this.recol_d = null;
         this.zoom2d = 2000;
@@ -131,8 +136,8 @@ export default class ObjType {
         this.stackable = false;
         this.cost = 1;
         this.members = false;
-        this.op = null;
-        this.iop = null;
+        this.op = [null, null, 'Take', null, null];
+        this.iop = [null, null, null, null, 'Drop'];
         this.manwear = -1;
         this.manwear2 = -1;
         this.manwearOffset = 0;
@@ -154,6 +159,7 @@ export default class ObjType {
         this.resizez = 128;
         this.ambient = 0;
         this.contrast = 0;
+        this.team = 0;
     }
 
     decode(dat: Packet): void {
@@ -167,8 +173,6 @@ export default class ObjType {
                 this.model = dat.g2();
             } else if (code === 2) {
                 this.name = dat.gjstr();
-            } else if (code === 3) {
-                this.desc = dat.gjstr();
             } else if (code === 4) {
                 this.zoom2d = dat.g2();
             } else if (code === 5) {
@@ -185,8 +189,6 @@ export default class ObjType {
                 if (this.yof2d > 32767) {
                     this.yof2d -= 65536;
                 }
-            } else if (code === 10) {
-                dat.pos += 2;
             } else if (code === 11) {
                 this.stackable = true;
             } else if (code === 12) {
@@ -195,12 +197,12 @@ export default class ObjType {
                 this.members = true;
             } else if (code === 23) {
                 this.manwear = dat.g2();
-                this.manwearOffset = dat.g1b();
+                this.manwearOffset = dat.g1();
             } else if (code === 24) {
                 this.manwear2 = dat.g2();
             } else if (code === 25) {
                 this.womanwear = dat.g2();
-                this.womanwearOffset = dat.g1b();
+                this.womanwearOffset = dat.g1();
             } else if (code === 26) {
                 this.womanwear2 = dat.g2();
             } else if (code >= 30 && code < 35) {
@@ -262,6 +264,8 @@ export default class ObjType {
                 this.ambient = dat.g1b();
             } else if (code === 114) {
                 this.contrast = dat.g1b() * 5;
+            } else if (code === 115) {
+                this.team = dat.g1();
             }
         }
     }
@@ -283,13 +287,6 @@ export default class ObjType {
         this.members = link.members;
         this.cost = link.cost;
 
-        let article: string = 'a';
-        const c: string = (link.name || '').toLowerCase().charAt(0);
-        if (c === 'a' || c === 'e' || c === 'i' || c === 'o' || c === 'u') {
-            article = 'an';
-        }
-        this.desc = `Swap this note at any bank for ${article} ${link.name}.`;
-
         this.stackable = true;
     }
 
@@ -307,7 +304,7 @@ export default class ObjType {
             }
         }
 
-        const model = Model.load(this.model);
+        const model = Model.load(ObjType.models!, this.model);
         if (!model) {
             return null;
         }
@@ -321,7 +318,7 @@ export default class ObjType {
         return model;
     }
 
-    getModelLit(count: number): Model | null {
+    getModelLit(cache: boolean, count: number): Model | null {
         if (this.countobj && this.countco && count > 1) {
             let id: number = -1;
             for (let i: number = 0; i < 10; i++) {
@@ -331,16 +328,18 @@ export default class ObjType {
             }
 
             if (id !== -1) {
-                return ObjType.list(id).getModelLit(1);
+                return ObjType.list(id).getModelLit(cache, 1);
             }
         }
 
-        let model = ObjType.modelCache.find(BigInt(this.id));
-        if (model) {
-            return model;
+        if (cache) {
+            const cached = ObjType.modelCache.find(BigInt(this.id));
+            if (cached) {
+                return cached;
+            }
         }
 
-        model = Model.load(this.model);
+        const model = Model.load(ObjType.models!, this.model);
         if (!model) {
             return null;
         }
@@ -355,11 +354,28 @@ export default class ObjType {
             }
         }
 
-        model.calculateNormals(this.ambient + 64, this.contrast + 768, -50, -10, -50, true);
-        model.useAABBMouseCheck = true;
+        if (cache) {
+            model.calculateNormals(this.ambient + 64, this.contrast + 768, -50, -10, -50, true);
+            model.useAABBMouseCheck = true;
 
-        ObjType.modelCache.put(model, BigInt(this.id));
+            ObjType.modelCache.put(model, BigInt(this.id));
+        }
         return model;
+    }
+
+    getStackSizeAlt(count: number): ObjType {
+        if (this.countobj && this.countco && count > 1) {
+            let id: number = -1;
+            for (let i: number = 0; i < 10; i++) {
+                if (count >= this.countco[i] && this.countco[i] !== 0) {
+                    id = this.countobj[i];
+                }
+            }
+            if (id !== -1) {
+                return ObjType.list(id);
+            }
+        }
+        return this;
     }
 
     static getSprite(id: number, count: number, outlineRgb: number): Pix32 | null {
@@ -395,7 +411,7 @@ export default class ObjType {
             }
         }
 
-        const model = obj.getModelLit(1);
+        const model = obj.getModelLit(true, 1);
         if (!model) {
             return null;
         }
@@ -534,13 +550,13 @@ export default class ObjType {
         }
 
         let ready = true;
-        if (!Model.requestDownload(wear)) {
+        if (!ObjType.models!.requestDownload(wear, 0)) {
             ready = false;
         }
-        if (wear2 != -1 && !Model.requestDownload(wear2)) {
+        if (wear2 != -1 && !ObjType.models!.requestDownload(wear2, 0)) {
             ready = false;
         }
-        if (wear3 != -1 && !Model.requestDownload(wear3)) {
+        if (wear3 != -1 && !ObjType.models!.requestDownload(wear3, 0)) {
             ready = false;
         }
         return ready;
@@ -563,13 +579,13 @@ export default class ObjType {
             id3 = this.womanwear3;
         }
 
-        let model: Model | null = Model.load(id1);
+        let model: Model | null = Model.load(ObjType.models!, id1);
         if (!model) {
             return null;
         }
 
         if (id2 !== -1) {
-            const model2: Model | null = Model.load(id2);
+            const model2: Model | null = Model.load(ObjType.models!, id2);
             if (!model2) {
                 return null;
             }
@@ -578,7 +594,7 @@ export default class ObjType {
                 const models: Model[] = [model, model2];
                 model = Model.combineForAnim(models, 2);
             } else {
-                const model3: Model | null = Model.load(id3);
+                const model3: Model | null = Model.load(ObjType.models!, id3);
                 if (!model3) {
                     return null;
                 }
@@ -589,9 +605,9 @@ export default class ObjType {
         }
 
         if (gender === 0 && this.manwearOffset !== 0) {
-            model.translate(this.manwearOffset, 0, 0);
+            model.translate(0, this.manwearOffset, 0);
         } else if (gender === 1 && this.womanwearOffset !== 0) {
-            model.translate(this.womanwearOffset, 0, 0);
+            model.translate(0, this.womanwearOffset, 0);
         }
 
         if (this.recol_s && this.recol_d) {
@@ -616,10 +632,10 @@ export default class ObjType {
         }
 
         let ready = true;
-        if (!Model.requestDownload(head)) {
+        if (!ObjType.models!.requestDownload(head, 0)) {
             ready = false;
         }
-        if (head2 != -1 && !Model.requestDownload(head2)) {
+        if (head2 != -1 && !ObjType.models!.requestDownload(head2, 0)) {
             ready = false;
         }
         return ready;
@@ -640,13 +656,13 @@ export default class ObjType {
             head2 = this.womanhead2;
         }
 
-        let model: Model | null = Model.load(head1);
+        let model: Model | null = Model.load(ObjType.models!, head1);
         if (!model) {
             return null;
         }
 
         if (head2 !== -1) {
-            const model2: Model | null = Model.load(head2);
+            const model2: Model | null = Model.load(ObjType.models!, head2);
             if (!model2) {
                 return null;
             }

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>RuneScape 2</title>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.7">
+
+    <style>
+        html {
+            touch-action: manipulation;
+        }
+
+        body,
+        td,
+        p {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            color: white;
+        }
+
+        body {
+            margin: 0px 0px;
+            overflow: auto;
+            background-color: black;
+        }
+
+        #game {
+            padding-left: 0;
+            padding-right: 0;
+            margin-left: auto;
+            margin-right: auto;
+            display: block;
+        }
+
+        canvas {
+            width: 765px;
+            height: 503px;
+            display: block;
+            /* touch-action: none; */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            outline: none;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
+            z-index: -1;
+            image-rendering: pixelated;
+        }
+
+        html:-webkit-full-screen {
+            background-color: black !important;
+        }
+    </style>
+</head>
+
+<body>
+    <center>
+        <div id="game">
+            <canvas id="canvas" width="765" height="503">
+                Your browser is not capable of running our web client.
+            </canvas>
+        </div>
+    </center>
+
+    <script type="module">
+        import { Client } from './client/client.js';
+
+        (() => {
+            new Client(1, false, true);
+        })();
+    </script>
+</body>
+
+</html>

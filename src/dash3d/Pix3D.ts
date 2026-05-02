@@ -1,8 +1,5 @@
 import Pix2D from '#/graphics/Pix2D.js';
-import Pix8 from '#/graphics/Pix8.js';
-
-import JagFile from '#/io/JagFile.js';
-import { Int32Array2d, TypedArray1d } from '#/util/Arrays.js';
+import type TextureProvider from '#/dash3d/TextureProvider.js';
 
 export default class Pix3D extends Pix2D {
     static lowMem: boolean = false;
@@ -14,20 +11,15 @@ export default class Pix3D extends Pix2D {
     static cosTable: Int32Array = new Int32Array(2048);
     static colourTable: Int32Array = new Int32Array(65536);
 
-    static textures: (Pix8 | null)[] = new TypedArray1d(50, null);
-    private static texTrans: boolean[] = new TypedArray1d(50, false);
-    private static texAverage: Int32Array = new Int32Array(50);
-    static activeTexels: (Int32Array | null)[] = new TypedArray1d(50, null);
-    static texCycle: Int32Array = new Int32Array(50);
-    static texPal: (Int32Array | null)[] = new TypedArray1d(50, null);
-    static numTextures: number = 0;
+    static textureManager: TextureProvider | null = null;
     static originX: number = 0;
     static originY: number = 0;
-    static texelPool: (Int32Array | null)[] | null = null;
-    static poolSize: number = 0;
+    static minX: number = 0;
+    static override maxX: number = 0;
+    static minY: number = 0;
+    static override maxY: number = 0;
     private static opaque: boolean = false;
 
-    static cycle: number = 0;
     static scanline: Int32Array = new Int32Array();
     static hclip: boolean = false;
     static trans: number = 0;
@@ -56,6 +48,10 @@ export default class Pix3D extends Pix2D {
         }
         this.originX = (Pix2D.width / 2) | 0;
         this.originY = (Pix2D.height / 2) | 0;
+        this.minX = -this.originX;
+        this.maxX = Pix2D.width - this.originX;
+        this.minY = -this.originY;
+        this.maxY = Pix2D.height - this.originY;
     }
 
     static override setClipping(width: number, height: number): void {
@@ -65,154 +61,47 @@ export default class Pix3D extends Pix2D {
         }
         this.originX = (width / 2) | 0;
         this.originY = (height / 2) | 0;
+        this.minX = -this.originX;
+        this.maxX = width - this.originX;
+        this.minY = -this.originY;
+        this.maxY = height - this.originY;
     }
 
-    static clearTexels(): void {
-        this.texelPool = null;
-        this.activeTexels.fill(null);
-    }
-
-    static initPool(size: number): void {
-        if (this.texelPool) {
-            return;
-        }
-
-        this.poolSize = size;
-
-        if (this.lowMem) {
-            this.texelPool = new Int32Array2d(size, 16384);
-        } else {
-            this.texelPool = new Int32Array2d(size, 65536);
-        }
-
-        this.activeTexels.fill(null);
-    }
-
-    static unpackTextures(textures: JagFile): void {
-        this.numTextures = 0;
-
-        for (let i: number = 0; i < 50; i++) {
-            try {
-                this.textures[i] = Pix8.depack(textures, i.toString());
-
-                if (this.lowMem && this.textures[i]?.owi === 128) {
-                    this.textures[i]?.halveSize();
-                } else {
-                    this.textures[i]?.trim();
-                }
-
-                this.numTextures++;
-            } catch (_e) {
-                // empty
+    static restoreClipping(scanline: Int32Array | null): Int32Array {
+        const width: number = Pix2D.clipMaxX - Pix2D.clipMinX;
+        const height: number = Pix2D.clipMaxY - Pix2D.clipMinY;
+        if (scanline === null) {
+            const count: number = height === 0 ? 1 : height;
+            scanline = new Int32Array(count);
+            for (let y: number = 0; y < count; y++) {
+                scanline[y] = (Pix2D.clipMinY + y) * Pix2D.width + Pix2D.clipMinX;
             }
         }
+
+        this.scanline = scanline;
+        this.originX = (width / 2) | 0;
+        this.originY = (height / 2) | 0;
+        this.minX = -this.originX;
+        this.maxX = width - this.originX;
+        this.minY = -this.originY;
+        this.maxY = height - this.originY;
+        return scanline;
+    }
+
+    static setTextures(textureManager: TextureProvider): void {
+        this.textureManager = textureManager;
     }
 
     static getTextureAverage(id: number): number {
-        if (this.texAverage[id] !== 0) {
-            return this.texAverage[id];
-        }
-
-        const palette: Int32Array | null = this.texPal[id];
-        if (!palette) {
-            return 0;
-        }
-
-        let r: number = 0;
-        let g: number = 0;
-        let b: number = 0;
-        const length: number = palette.length;
-        for (let i: number = 0; i < length; i++) {
-            r += (palette[i] >> 16) & 0xff;
-            g += (palette[i] >> 8) & 0xff;
-            b += palette[i] & 0xff;
-        }
-
-        let rgb: number = (((r / length) | 0) << 16) + (((g / length) | 0) << 8) + ((b / length) | 0);
-        rgb = this.gammaCorrect(rgb, 1.4);
-        if (rgb === 0) {
-            rgb = 1;
-        }
-        this.texAverage[id] = rgb;
-        return rgb;
-    }
-
-    static pushTexture(id: number): void {
-        if (this.activeTexels[id] && this.texelPool) {
-            this.texelPool[this.poolSize++] = this.activeTexels[id];
-            this.activeTexels[id] = null;
-        }
+        return this.textureManager?.getAverageRgb(id) ?? 0;
     }
 
     private static getTexels(id: number): Int32Array | null {
-        this.texCycle[id] = this.cycle++;
-        if (this.activeTexels[id]) {
-            return this.activeTexels[id];
-        }
-
-        let texels: Int32Array | null;
-        if (this.poolSize > 0 && this.texelPool) {
-            texels = this.texelPool[--this.poolSize];
-            this.texelPool[this.poolSize] = null;
-        } else {
-            let cycle: number = 0;
-            let selected: number = -1;
-            for (let t: number = 0; t < this.numTextures; t++) {
-                if (this.activeTexels[t] && (this.texCycle[t] < cycle || selected === -1)) {
-                    cycle = this.texCycle[t];
-                    selected = t;
-                }
-            }
-            texels = this.activeTexels[selected];
-            this.activeTexels[selected] = null;
-        }
-
-        this.activeTexels[id] = texels;
-        const texture: Pix8 | null = this.textures[id];
-        const palette: Int32Array | null = this.texPal[id];
-
-        if (!texels || !texture || !palette) {
+        if (!this.textureManager) {
             return null;
         }
 
-        if (this.lowMem) {
-            this.texTrans[id] = false;
-            for (let i: number = 0; i < 4096; i++) {
-                const rgb: number = (texels[i] = palette[texture.data[i]] & 0xf8f8ff);
-                if (rgb === 0) {
-                    this.texTrans[id] = true;
-                }
-                texels[i + 4096] = (rgb - (rgb >>> 3)) & 0xf8f8ff;
-                texels[i + 8192] = (rgb - (rgb >>> 2)) & 0xf8f8ff;
-                texels[i + 12288] = (rgb - (rgb >>> 2) - (rgb >>> 3)) & 0xf8f8ff;
-            }
-        } else {
-            if (texture.wi === 64) {
-                for (let y: number = 0; y < 128; y++) {
-                    for (let x: number = 0; x < 128; x++) {
-                        texels[x + ((y << 7) | 0)] = palette[texture.data[(x >> 1) + (((y >> 1) << 6) | 0)]];
-                    }
-                }
-            } else {
-                for (let i: number = 0; i < 16384; i++) {
-                    texels[i] = palette[texture.data[i]];
-                }
-            }
-
-            this.texTrans[id] = false;
-            for (let i: number = 0; i < 16384; i++) {
-                texels[i] &= 0xf8f8ff;
-                const rgb: number = texels[i];
-                if (rgb === 0) {
-                    this.texTrans[id] = true;
-                }
-                texels[i + 16384] = (rgb - (rgb >>> 3)) & 0xf8f8ff;
-                texels[i + 32768] = (rgb - (rgb >>> 2)) & 0xf8f8ff;
-                texels[i + 49152] = (rgb - (rgb >>> 2) - (rgb >>> 3)) & 0xf8f8ff;
-            }
-        }
-
-        return texels;
+        return this.textureManager.getTexels(id);
     }
 
     static initColourTable(brightness: number): void {
@@ -287,30 +176,9 @@ export default class Pix3D extends Pix2D {
             }
         }
 
-        for (let id: number = 0; id < 50; id++) {
-            const texture: Pix8 | null = this.textures[id];
-            if (!texture) {
-                continue;
-            }
-
-            const palette: Int32Array = texture.bpal;
-            this.texPal[id] = new Int32Array(palette.length);
-            for (let i: number = 0; i < palette.length; i++) {
-                const texturePalette: Int32Array | null = this.texPal[id];
-                if (!texturePalette) {
-                    continue;
-                }
-
-                texturePalette[i] = this.gammaCorrect(palette[i], randomBrightness);
-            }
-        }
-
-        for (let id: number = 0; id < 50; id++) {
-            this.pushTexture(id);
-        }
     }
 
-    private static gammaCorrect(rgb: number, gamma: number): number {
+    static gammaCorrect(rgb: number, gamma: number): number {
         const r: number = (rgb >> 16) / 256.0;
         const g: number = ((rgb >> 8) & 0xff) / 256.0;
         const b: number = (rgb & 0xff) / 256.0;
@@ -323,6 +191,16 @@ export default class Pix3D extends Pix2D {
         const intG: number = (powG * 256.0) | 0;
         const intB: number = (powB * 256.0) | 0;
         return (intR << 16) + (intG << 8) + intB;
+    }
+
+    static textureLightColour(hsl: number, lightness: number): number {
+        let value = ((hsl & 0x7f) * (127 - lightness)) >> 7;
+        if (value < 2) {
+            value = 2;
+        } else if (value > 126) {
+            value = 126;
+        }
+        return (hsl & 0xff80) + value;
     }
 
     static gouraudTriangle(
@@ -1627,7 +1505,20 @@ export default class Pix3D extends Pix2D {
         texture: number
     ): void {
         const texels: Int32Array | null = this.getTexels(texture);
-        this.opaque = !this.texTrans[texture];
+        if (!texels) {
+            const average = this.textureManager?.getAverageRgb(texture) ?? 0;
+            this.gouraudTriangle(
+                xA, xB, xC,
+                yA, yB, yC,
+                this.textureLightColour(average, shadeA),
+                this.textureLightColour(average, shadeB),
+                this.textureLightColour(average, shadeC)
+            );
+            return;
+        }
+
+        this.lowMem = this.textureManager?.isLowMem(texture) ?? false;
+        this.opaque = this.textureManager?.isOpaque(texture) ?? false;
 
         const verticalX: number = originX - txB;
         const verticalY: number = originY - tyB;

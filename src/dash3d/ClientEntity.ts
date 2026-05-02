@@ -1,4 +1,4 @@
-import SeqType, { PostanimMove } from '#/config/SeqType.js';
+import SeqType, { PreanimMove } from '#/config/SeqType.js';
 
 import ModelSource from '#/dash3d/ModelSource.js';
 
@@ -11,7 +11,8 @@ export default abstract class ClientEntity extends ModelSource {
     needsForwardDrawPadding: boolean = false;
     size: number = 1;
     readyanim: number = -1;
-    turnanim: number = -1;
+    turnleftanim: number = -1;
+    turnrightanim: number = -1;
     walkanim: number = -1;
     walkanim_b: number = -1;
     walkanim_l: number = -1;
@@ -51,8 +52,9 @@ export default abstract class ClientEntity extends ModelSource {
     exactMoveStart: number = 0;
     exactMoveFacing: number = 0;
     cycle: number = 0;
-    height: number = 0;
+    height: number = 200;
     dstYaw: number = 0;
+    turnCycle: number = 0;
     routeLength: number = 0;
     routeX: Int32Array = new Int32Array(10);
     routeZ: Int32Array = new Int32Array(10);
@@ -63,8 +65,8 @@ export default abstract class ClientEntity extends ModelSource {
 
     abstract isReady(): boolean;
 
-    teleport(jump: boolean, x: number, z: number): void {
-        if (this.primaryAnim !== -1 && SeqType.list[this.primaryAnim].postanim_move === PostanimMove.ABORTANIM) {
+    teleport(z: number, jump: boolean, x: number): void {
+        if (this.primaryAnim !== -1 && SeqType.list(this.primaryAnim).preanim_move === PreanimMove.DELAYANIM) {
             this.primaryAnim = -1;
         }
 
@@ -99,7 +101,7 @@ export default abstract class ClientEntity extends ModelSource {
         this.z = this.routeZ[0] * 128 + this.size * 64;
     }
 
-    moveCode(running: boolean, direction: number): void {
+    moveCode(direction: number, running: boolean): void {
         let nextX: number = this.routeX[0];
         let nextZ: number = this.routeZ[0];
 
@@ -125,7 +127,7 @@ export default abstract class ClientEntity extends ModelSource {
             nextZ--;
         }
 
-        if (this.primaryAnim !== -1 && SeqType.list[this.primaryAnim].postanim_move === PostanimMove.ABORTANIM) {
+        if (this.primaryAnim !== -1 && SeqType.list(this.primaryAnim).preanim_move === PreanimMove.DELAYANIM) {
             this.primaryAnim = -1;
         }
 
@@ -149,7 +151,7 @@ export default abstract class ClientEntity extends ModelSource {
         this.preanimRouteLength = 0;
     }
 
-    addHitmark(loopCycle: number, type: number, value: number) {
+    addHitmark(type: number, loopCycle: number, value: number) {
         for (let i = 0; i < 4; i++) {
             if (this.damageCycles[i] <= loopCycle) {
                 this.damageValues[i] = value;

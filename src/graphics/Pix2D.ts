@@ -19,19 +19,14 @@ export default class Pix2D extends Linkable2 {
         this.pixels = pixels;
         this.width = width;
         this.height = height;
-        this.setClipping(0, 0, width, height);
+        this.setSubClipping(0, 0, width, height);
     }
 
     static resetClipping(): void {
-        this.clipMinX = 0;
-        this.clipMinY = 0;
-        this.clipMaxX = this.width;
-        this.clipMaxY = this.height;
-        this.sizeX = this.clipMaxX - 1;
-        this.maxX = (this.clipMaxX / 2) | 0;
+        this.setClipping();
     }
 
-    static setClipping(x1: number, y1: number, x2: number, y2: number): void {
+    static setSubClipping(x1: number, y1: number, x2: number, y2: number): void {
         if (x1 < 0) {
             x1 = 0;
         }
@@ -58,10 +53,55 @@ export default class Pix2D extends Linkable2 {
         this.maxY = (this.clipMaxY / 2) | 0;
     }
 
+    static setClipping(x1?: number, y1?: number, x2?: number, y2?: number): void {
+        if (x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+            this.clipMinX = 0;
+            this.clipMinY = 0;
+            this.clipMaxX = this.width;
+            this.clipMaxY = this.height;
+            this.sizeX = this.clipMaxX - 1;
+            this.maxX = (this.clipMaxX / 2) | 0;
+            this.maxY = (this.clipMaxY / 2) | 0;
+            return;
+        }
+
+        this.setSubClipping(x1, y1, x2, y2);
+    }
+
+    static method914(clip: Int32Array | number[]): void {
+        this.clipMinX = clip[0];
+        this.clipMinY = clip[1];
+        this.clipMaxX = clip[2];
+        this.clipMaxY = clip[3];
+        this.sizeX = this.clipMaxX - 1;
+        this.maxX = (this.clipMaxX / 2) | 0;
+        this.maxY = (this.clipMaxY / 2) | 0;
+    }
+
+    static saveClipping(clip: Int32Array | number[]): void {
+        clip[0] = this.clipMinX;
+        clip[1] = this.clipMinY;
+        clip[2] = this.clipMaxX;
+        clip[3] = this.clipMaxY;
+    }
+
     static cls(): void {
-        const len: number = this.width * this.height;
-        for (let i: number = 0; i < len; i++) {
-            this.pixels[i] = 0;
+        let offset: number = 0;
+        let length: number = this.height * this.width - 7;
+        while (offset < length) {
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+            this.pixels[offset++] = 0;
+        }
+
+        length += 7;
+        while (offset < length) {
+            this.pixels[offset++] = 0;
         }
     }
 
@@ -143,8 +183,8 @@ export default class Pix2D extends Linkable2 {
         this.hlineTrans(x, y, w, rgb, alpha);
         this.hlineTrans(x, y + h - 1, w, rgb, alpha);
         if (h >= 3) {
-            this.vlineTrans(x, y, h, rgb, alpha);
-            this.vlineTrans(x + w - 1, y, h, rgb, alpha);
+            this.vlineTrans(x, y + 1, h - 2, rgb, alpha);
+            this.vlineTrans(x + w - 1, y + 1, h - 2, rgb, alpha);
         }
     }
 
@@ -246,46 +286,71 @@ export default class Pix2D extends Linkable2 {
         }
     }
 
-    // mapview applet:
-
-    static fillCircle(xCenter: number, yCenter: number, yRadius: number, rgb: number, alpha: number): void {
-        const invAlpha: number = 256 - alpha;
-        const r0: number = ((rgb >> 16) & 0xff) * alpha;
-        const g0: number = ((rgb >> 8) & 0xff) * alpha;
-        const b0: number = (rgb & 0xff) * alpha;
-
-        let yStart: number = yCenter - yRadius;
-        if (yStart < 0) {
-            yStart = 0;
-        }
-
-        let yEnd: number = yCenter + yRadius;
-        if (yEnd >= this.height) {
-            yEnd = this.height - 1;
-        }
-
-        for (let y: number = yStart; y <= yEnd; y++) {
-            const midpoint: number = y - yCenter;
-            const xRadius: number = Math.sqrt(yRadius * yRadius - midpoint * midpoint) | 0;
-
-            let xStart: number = xCenter - xRadius;
-            if (xStart < 0) {
-                xStart = 0;
+    static line(x0: number, y0: number, x1: number, y1: number, rgb: number): void {
+        let dx: number = x1 - x0;
+        let dy: number = y1 - y0;
+        if (dy === 0) {
+            if (dx >= 0) {
+                this.hline(x0, y0, dx + 1, rgb);
+            } else {
+                this.hline(x0 + dx, y0, 1 - dx, rgb);
+            }
+        } else if (dx !== 0) {
+            if (dx + dy < 0) {
+                x0 += dx;
+                dx = -dx;
+                y0 += dy;
+                dy = -dy;
             }
 
-            let xEnd: number = xCenter + xRadius;
-            if (xEnd >= this.width) {
-                xEnd = this.width - 1;
+            if (dx > dy) {
+                const yStart: number = y0 << 16;
+                let y: number = yStart + 32768;
+                const dyFixed: number = dy << 16;
+                const slope: number = Math.floor(dyFixed / dx + 0.5);
+                let xEnd: number = x0 + dx;
+                if (x0 < this.clipMinX) {
+                    y += (this.clipMinX - x0) * slope;
+                    x0 = this.clipMinX;
+                }
+                if (xEnd >= this.clipMaxX) {
+                    xEnd = this.clipMaxX - 1;
+                }
+                while (x0 <= xEnd) {
+                    const py: number = y >> 16;
+                    if (py >= this.clipMinY && py < this.clipMaxY) {
+                        this.pixels[this.width * py + x0] = rgb;
+                    }
+                    y += slope;
+                    x0++;
+                }
+            } else {
+                const xStart: number = x0 << 16;
+                let x: number = xStart + 32768;
+                const dxFixed: number = dx << 16;
+                const slope: number = Math.floor(dxFixed / dy + 0.5);
+                let yEnd: number = y0 + dy;
+                if (y0 < this.clipMinY) {
+                    x += (this.clipMinY - y0) * slope;
+                    y0 = this.clipMinY;
+                }
+                if (yEnd >= this.clipMaxY) {
+                    yEnd = this.clipMaxY - 1;
+                }
+                while (y0 <= yEnd) {
+                    const px: number = x >> 16;
+                    if (px >= this.clipMinX && px < this.clipMaxX) {
+                        this.pixels[this.width * y0 + px] = rgb;
+                    }
+                    x += slope;
+                    y0++;
+                }
             }
-
-            let offset: number = xStart + y * this.width;
-            for (let x: number = xStart; x <= xEnd; x++) {
-                const r1: number = ((this.pixels[offset] >> 16) & 0xff) * invAlpha;
-                const g1: number = ((this.pixels[offset] >> 8) & 0xff) * invAlpha;
-                const b1: number = (this.pixels[offset] & 0xff) * invAlpha;
-                const mixed: number = (((r0 + r1) >> 8) << 16) + (((g0 + g1) >> 8) << 8) + ((b0 + b1) >> 8);
-                this.pixels[offset++] = mixed;
-            }
+        } else if (dy >= 0) {
+            this.vline(x0, y0, dy + 1, rgb);
+        } else {
+            this.vline(x0, y0 + dy, -dy + 1, rgb);
         }
     }
+
 }

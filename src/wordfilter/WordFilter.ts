@@ -1,4 +1,3 @@
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
 
 export default class WordFilter {
@@ -31,14 +30,6 @@ export default class WordFilter {
     private static readonly badCombinations: number[][][] = [];
     private static readonly domains: Uint16Array[] = [];
     private static readonly fragments: number[] = [];
-
-    static unpack(wordenc: JagFile): void {
-        const fragments: Packet = new Packet(wordenc.read('fragmentsenc.txt'));
-        const bad: Packet = new Packet(wordenc.read('badenc.txt'));
-        const domain: Packet = new Packet(wordenc.read('domainenc.txt'));
-        const tld: Packet = new Packet(wordenc.read('tldlist.txt'));
-        this.read(bad, domain, fragments, tld);
-    }
 
     static filter(input: string): string {
         const characters: string[] = [...input];

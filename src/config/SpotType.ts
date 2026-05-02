@@ -1,22 +1,24 @@
 import SeqType from '#/config/SeqType.js';
 
+import Linkable2 from '#/datastruct/Linkable2.js';
 import LruCache from '#/datastruct/LruCache.js';
 
 import Model from '#/dash3d/Model.js';
 
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
-export default class SpotType {
+export default class SpotType extends Linkable2 {
     static numDefinitions: number = 0;
-    static list: SpotType[] = [];
+    static recentUse: LruCache<SpotType> = new LruCache(64);
+    static models: Js5 | null = null;
+    static configClient: Js5 | null = null;
     static modelCache: LruCache<Model> = new LruCache(30);
 
     id: number = 0;
 
     model: number = 0;
     anim: number = -1;
-    seq: SeqType | null = null;
     recol_s: Uint16Array = new Uint16Array(6);
     recol_d: Uint16Array = new Uint16Array(6);
     resizeh: number = 128;
@@ -25,20 +27,35 @@ export default class SpotType {
     ambient: number = 0;
     contrast: number = 0;
 
-    static init(config: JagFile): void {
-        const dat: Packet = new Packet(config.read('spotanim.dat'));
+    static init(models: Js5, config: Js5): void {
+        this.models = models;
+        this.configClient = config;
+        this.numDefinitions = config.getFileIdLimit(13);
+    }
 
-        this.numDefinitions = dat.g2();
-        this.list = new Array(this.numDefinitions);
-
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            if (!this.list[id]) {
-                this.list[id] = new SpotType();
-            }
-
-            this.list[id].id = id;
-            this.list[id].decode(dat);
+    static list(id: number): SpotType {
+        if (!this.configClient) {
+            throw new Error();
         }
+
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
+        }
+
+        const spot = new SpotType();
+        spot.id = id;
+        const data = this.configClient.getFile(id, 13);
+        if (data) {
+            spot.decode(new Packet(data));
+        }
+        this.recentUse.put(spot, BigInt(id));
+        return spot;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
+        this.modelCache.clear();
     }
 
     decode(dat: Packet): void {
@@ -52,10 +69,6 @@ export default class SpotType {
                 this.model = dat.g2();
             } else if (code === 2) {
                 this.anim = dat.g2();
-
-                if (SeqType.list) {
-                    this.seq = SeqType.list[this.anim];
-                }
             } else if (code === 4) {
                 this.resizeh = dat.g2();
             } else if (code === 5) {
@@ -70,30 +83,55 @@ export default class SpotType {
                 this.recol_s[code - 40] = dat.g2();
             } else if (code >= 50 && code < 60) {
                 this.recol_d[code - 50] = dat.g2();
-            } else {
-                console.log('Error unrecognised spotanim config code: ', code);
             }
         }
     }
 
-    getTempModel2(): Model | null {
+    getTempModel2(frame: number = -1): Model | null {
         let model = SpotType.modelCache.find(BigInt(this.id));
-        if (model) {
-            return model;
-        }
-
-        model = Model.load(this.model);
         if (!model) {
-            return null;
+            model = Model.load(SpotType.models!, this.model);
+            if (!model) {
+                return null;
+            }
+
+            for (let i: number = 0; i < 6; i++) {
+                if (this.recol_s[0] !== 0) {
+                    model.recolour(this.recol_s[i], this.recol_d[i]);
+                }
+            }
+
+            model.prepareAnim();
+            model.calculateNormals(this.ambient + 64, this.contrast + 850, -30, -50, -30, true);
+            SpotType.modelCache.put(model, BigInt(this.id));
         }
 
-        for (let i: number = 0; i < 6; i++) {
-            if (this.recol_s[0] !== 0) {
-                model.recolour(this.recol_s[i], this.recol_d[i]);
+        let animated: Model;
+        if (this.anim === -1 || frame === -1) {
+            animated = Model.copyForAnim(model, true, true, false);
+        } else {
+            animated = SeqType.list(this.anim).animateModel2(model, frame);
+        }
+
+        if (this.resizeh !== 128 || this.resizev !== 128) {
+            animated.resize(this.resizeh, this.resizev, this.resizeh);
+        }
+
+        if (this.angle !== 0) {
+            if (this.angle === 90) {
+                animated.rotate90();
+            }
+            if (this.angle === 180) {
+                animated.rotate90();
+                animated.rotate90();
+            }
+            if (this.angle === 270) {
+                animated.rotate90();
+                animated.rotate90();
+                animated.rotate90();
             }
         }
 
-        SpotType.modelCache.put(model, BigInt(this.id));
-        return model;
+        return animated;
     }
 }

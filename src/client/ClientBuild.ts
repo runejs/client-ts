@@ -1,6 +1,9 @@
 import FloType from '#/config/FloType.js';
+import FluType from '#/config/FluType.js';
 import LocType from '#/config/LocType.js';
+import BgSound from '#/sound/BgSound.js';
 
+import { Client } from '#/client/Client.js';
 import ClientLocAnim from '#/dash3d/ClientLocAnim.js';
 import CollisionMap, { BuildArea } from '#/dash3d/CollisionMap.js';
 import { LocAngle } from '#/dash3d/LocAngle.js';
@@ -8,13 +11,13 @@ import { LocShape } from '#/dash3d/LocShape.js';
 import { MapFlag } from '#/dash3d/MapFlag.js';
 import Model from '#/dash3d/Model.js';
 import type ModelSource from '#/dash3d/ModelSource.js';
+import RegionRotate from '#/dash3d/RegionRotate.js';
 import { TerrainOverlayShape } from '#/dash3d/TerrainOverlayShape.js';
 import World from '#/dash3d/World.js';
 
 import { Colour } from '#/graphics/Colour.js';
 import Pix3D from '#/dash3d/Pix3D.js';
 
-import type OnDemand from '#/io/OnDemand.js';
 import Packet from '#/io/Packet.js';
 
 import { Int32Array2d, Int32Array3d, Uint8Array3d } from '#/util/Arrays.js';
@@ -29,7 +32,8 @@ export default class ClientBuild {
     static ligOff: number = ((Math.random() * 33.0) | 0) - 16;
 
     static lowMem: boolean = true;
-    static minusedlevel: number = 0;
+    static minusedlevel: number = 99;
+    static lastBuiltLevel: number = 0;
 
     private readonly maxTileX: number;
     private readonly maxTileZ: number;
@@ -148,11 +152,11 @@ export default class ClientBuild {
                         const t1: number = this.floort1[level][x1][z0] & 0xff;
 
                         if (t1 > 0) {
-                            const flo: FloType = FloType.list[t1 - 1];
-                            this.huetot[z0] += flo.underlayHue;
-                            this.sattot[z0] += flo.saturation;
-                            this.ligtot[z0] += flo.lightness;
-                            this.comtot[z0] += flo.chroma;
+                            const flu: FluType = FluType.list(t1 - 1);
+                            this.huetot[z0] += flu.hue;
+                            this.sattot[z0] += flu.saturation;
+                            this.ligtot[z0] += flu.lightness;
+                            this.comtot[z0] += flu.chroma;
                             this.tot[z0]++;
                         }
                     }
@@ -162,11 +166,11 @@ export default class ClientBuild {
                         const t1: number = this.floort1[level][x2][z0] & 0xff;
 
                         if (t1 > 0) {
-                            const flo: FloType = FloType.list[t1 - 1];
-                            this.huetot[z0] -= flo.underlayHue;
-                            this.sattot[z0] -= flo.saturation;
-                            this.ligtot[z0] -= flo.lightness;
-                            this.comtot[z0] -= flo.chroma;
+                            const flu: FluType = FluType.list(t1 - 1);
+                            this.huetot[z0] -= flu.hue;
+                            this.sattot[z0] -= flu.saturation;
+                            this.ligtot[z0] -= flu.lightness;
+                            this.comtot[z0] -= flu.chroma;
                             this.tot[z0]--;
                         }
                     }
@@ -198,7 +202,11 @@ export default class ClientBuild {
                             blendTot -= this.tot[dz2];
                         }
 
-                        if (z0 >= 1 && z0 < this.maxTileZ - 1 && (!ClientBuild.lowMem || ((this.mapl[level][x0][z0] & MapFlag.ForceHighDetail) === 0 && this.getVisBelowLevel(level, x0, z0) === ClientBuild.minusedlevel))) {
+                        if (z0 >= 1 && z0 < this.maxTileZ - 1 && (!ClientBuild.lowMem || (this.mapl[0][x0][z0] & MapFlag.LinkBelow) !== 0 || ((this.mapl[level][x0][z0] & MapFlag.ForceHighDetail) === 0 && this.getVisBelowLevel(level, x0, z0) === ClientBuild.lastBuiltLevel))) {
+                            if (level < ClientBuild.minusedlevel) {
+                                ClientBuild.minusedlevel = level;
+                            }
+
                             const t1: number = this.floort1[level][x0][z0] & 0xff;
                             const t2: number = this.floort2[level][x0][z0] & 0xff;
 
@@ -220,7 +228,7 @@ export default class ClientBuild {
                                     const hue: number = ((blendHue * 256) / blendCom) | 0;
                                     const sat: number = (blendSat / blendTot) | 0;
                                     let lig: number = (blendLig / blendTot) | 0;
-                                    t1Colour = ClientBuild.getTable(hue, sat, lig);
+                                    t1Colour = ClientBuild.getTable(sat, lig, hue);
 
                                     const randomHue: number = (hue + ClientBuild.hueOff) & 0xff;
                                     let randomLig = lig + ClientBuild.ligOff;
@@ -229,13 +237,16 @@ export default class ClientBuild {
                                     } else if (randomLig > 255) {
                                         randomLig = 255;
                                     }
-                                    t1RandColour = ClientBuild.getTable(randomHue, sat, randomLig);
+                                    t1RandColour = ClientBuild.getTable(sat, randomLig, randomHue);
                                 }
 
                                 if (level > 0) {
-                                    let occludes: boolean = t1 !== 0 || this.floors[level][x0][z0] === TerrainOverlayShape.PLAIN;
+                                    let occludes: boolean = true;
+                                    if (t1 === 0 && this.floors[level][x0][z0] !== TerrainOverlayShape.PLAIN) {
+                                        occludes = false;
+                                    }
 
-                                    if (t2 > 0 && !FloType.list[t2 - 1].occlude) {
+                                    if (t2 > 0 && !FloType.list(t2 - 1).occlude) {
                                         occludes = false;
                                     }
 
@@ -276,7 +287,7 @@ export default class ClientBuild {
                                 } else {
                                     const shape: number = this.floors[level][x0][z0] + 1;
                                     const rotation: number = this.floorr[level][x0][z0];
-                                    const flo: FloType = FloType.list[t2 - 1];
+                                    const flo: FloType = FloType.list(t2 - 1);
 
                                     let texture: number = flo.texture;
                                     let t2Colour: number;
@@ -285,12 +296,37 @@ export default class ClientBuild {
                                         overlay = Pix3D.getTextureAverage(texture);
                                         t2Colour = -1;
                                     } else if (flo.colour === Colour.MAGENTA) {
-                                        overlay = 0;
+                                        overlay = -2;
                                         t2Colour = -2;
                                         texture = -1;
                                     } else {
-                                        t2Colour = ClientBuild.getTable(flo.hue, flo.saturation, flo.lightness);
-                                        overlay = Pix3D.colourTable[ClientBuild.getOCol(flo.overlayHsl, 96)];
+                                        t2Colour = ClientBuild.getTable(flo.saturation, flo.lightness, flo.hue);
+                                        const randomHue = (flo.hue + ClientBuild.hueOff) & 0xff;
+                                        let randomLightness = flo.lightness + ClientBuild.ligOff;
+                                        if (randomLightness < 0) {
+                                            randomLightness = 0;
+                                        } else if (randomLightness > 255) {
+                                            randomLightness = 255;
+                                        }
+                                        overlay = ClientBuild.getTable(flo.saturation, randomLightness, randomHue);
+                                    }
+
+                                    if (overlay !== -2) {
+                                        overlay = Pix3D.colourTable[ClientBuild.getOCol(overlay, 96)];
+                                    } else {
+                                        overlay = 0;
+                                    }
+
+                                    if (flo.mapcolour !== -1) {
+                                        const randomHue = (flo.mapHue + ClientBuild.hueOff) & 0xff;
+                                        let randomLightness = flo.mapLightness + ClientBuild.ligOff;
+                                        if (randomLightness < 0) {
+                                            randomLightness = 0;
+                                        } else if (randomLightness > 255) {
+                                            randomLightness = 255;
+                                        }
+                                        const mapColour = ClientBuild.getTable(flo.mapSaturation, randomLightness, randomHue);
+                                        overlay = Pix3D.colourTable[ClientBuild.getOCol(mapColour, 96)];
                                     }
 
                                     world?.setGround(
@@ -329,7 +365,7 @@ export default class ClientBuild {
             }
         }
 
-        world?.shareLight(64, 768, -50, -10, -50);
+        world?.shareLight();
 
         for (let x: number = 0; x < this.maxTileX; x++) {
             for (let z: number = 0; z < this.maxTileZ; z++) {
@@ -390,7 +426,7 @@ export default class ClientBuild {
                                 const minY: number = this.groundh[maxLevel][tileX][minTileZ] - 240;
                                 const maxX: number = this.groundh[minLevel][tileX][minTileZ];
 
-                                World.setOcclude(topLevel, 1, tileX * 128, minY, minTileZ * 128, tileX * 128, maxX, maxTileZ * 128 + 128);
+                                World.setOcclude(topLevel, 1, tileX * 128, tileX * 128, minTileZ * 128, maxTileZ * 128 + 128, minY, maxX);
 
                                 for (let l: number = minLevel; l <= maxLevel; l++) {
                                     for (let z: number = minTileZ; z <= maxTileZ; z++) {
@@ -438,7 +474,7 @@ export default class ClientBuild {
                                 const minY: number = this.groundh[maxLevel][minTileX][tileZ] - 240;
                                 const maxY: number = this.groundh[minLevel][minTileX][tileZ];
 
-                                World.setOcclude(topLevel, 2, minTileX * 128, minY, tileZ * 128, maxTileX * 128 + 128, maxY, tileZ * 128);
+                                World.setOcclude(topLevel, 2, minTileX * 128, maxTileX * 128 + 128, tileZ * 128, tileZ * 128, minY, maxY);
 
                                 for (let l: number = minLevel; l <= maxLevel; l++) {
                                     for (let x: number = minTileX; x <= maxTileX; x++) {
@@ -482,7 +518,7 @@ export default class ClientBuild {
                             if ((maxTileX + 1 - minTileX) * (maxTileZ + 1 - minTileZ) >= 4) {
                                 const y: number = this.groundh[level][minTileX][minTileZ];
 
-                                World.setOcclude(topLevel, 4, minTileX * 128, y, minTileZ * 128, maxTileX * 128 + 128, y, maxTileZ * 128 + 128);
+                                World.setOcclude(topLevel, 4, minTileX * 128, maxTileX * 128 + 128, minTileZ * 128, maxTileZ * 128 + 128, y, y);
 
                                 for (let x: number = minTileX; x <= maxTileX; x++) {
                                     for (let z: number = minTileZ; z <= maxTileZ; z++) {
@@ -566,72 +602,81 @@ export default class ClientBuild {
         }
     }
 
-    loadGround(src: Uint8Array, originX: number, originZ: number, xOffset: number, zOffset: number): void {
-        const buf: Packet = new Packet(src);
-
+    loadGround(src: Uint8Array, originX: number, originZ: number, xOffset: number, zOffset: number, collisions: (CollisionMap | null)[]): void {
         for (let level: number = 0; level < BuildArea.LEVELS; level++) {
             for (let x: number = 0; x < 64; x++) {
                 for (let z: number = 0; z < 64; z++) {
-                    const stx: number = x + xOffset;
-                    const stz: number = z + zOffset;
-                    let opcode: number;
-
-                    if (stx >= 0 && stx < BuildArea.SIZE && stz >= 0 && stz < BuildArea.SIZE) {
-                        this.mapl[level][stx][stz] = 0;
-
-                        while (true) {
-                            opcode = buf.g1();
-                            if (opcode === 0) {
-                                if (level === 0) {
-                                    this.groundh[0][stx][stz] = -ClientBuild.perlinNoise(stx + originX + 932731, stz + 556238 + originZ) * 8;
-                                } else {
-                                    this.groundh[level][stx][stz] = this.groundh[level - 1][stx][stz] - 240;
-                                }
-                                break;
-                            }
-
-                            if (opcode === 1) {
-                                let height: number = buf.g1();
-                                if (height === 1) {
-                                    height = 0;
-                                }
-                                if (level === 0) {
-                                    this.groundh[0][stx][stz] = -height * 8;
-                                } else {
-                                    this.groundh[level][stx][stz] = this.groundh[level - 1][stx][stz] - height * 8;
-                                }
-                                break;
-                            }
-
-                            if (opcode <= 49) {
-                                this.floort2[level][stx][stz] = buf.g1b();
-                                this.floors[level][stx][stz] = ((((opcode - 2) / 4) | 0) << 24) >> 24;
-                                this.floorr[level][stx][stz] = (((opcode - 2) & 0x3) << 24) >> 24;
-                            } else if (opcode <= 81) {
-                                this.mapl[level][stx][stz] = ((opcode - 49) << 24) >> 24;
-                            } else {
-                                this.floort1[level][stx][stz] = ((opcode - 81) << 24) >> 24;
-                            }
-                        }
-                    } else {
-                        while (true) {
-                            opcode = buf.g1();
-                            if (opcode === 0) {
-                                break;
-                            }
-
-                            if (opcode === 1) {
-                                buf.g1();
-                                break;
-                            }
-
-                            if (opcode <= 49) {
-                                buf.g1();
-                            }
+                    if (xOffset + x > 0 && xOffset + x < 103 && zOffset + z > 0 && zOffset + z < 103) {
+                        const collision: CollisionMap | null = collisions[level];
+                        if (collision) {
+                            collision.flags[CollisionMap.index(xOffset + x, zOffset + z)] &= 0xfeffffff;
                         }
                     }
                 }
             }
+        }
+
+        const buf: Packet = new Packet(src);
+        for (let level: number = 0; level < BuildArea.LEVELS; level++) {
+            for (let x: number = 0; x < 64; x++) {
+                for (let z: number = 0; z < 64; z++) {
+                    this.loadGroundSquare(x + xOffset, 0, buf, z + zOffset, originZ, originX, level);
+                }
+            }
+        }
+    }
+
+    loadGroundRegion(src: Uint8Array, dstLevel: number, dstX: number, dstZ: number, srcLevel: number, srcX: number, srcZ: number, rotation: number, collisions: (CollisionMap | null)[]): void {
+        for (let x = 0; x < 8; x++) {
+            for (let z = 0; z < 8; z++) {
+                if (dstX + x > 0 && dstX + x < 103 && dstZ + z > 0 && dstZ + z < 103) {
+                    const collision = collisions[dstLevel];
+                    if (collision) {
+                        collision.flags[CollisionMap.index(dstX + x, dstZ + z)] &= 0xfeffffff;
+                    }
+                }
+            }
+        }
+
+        const buf = new Packet(src);
+        for (let level = 0; level < BuildArea.LEVELS; level++) {
+            for (let x = 0; x < 64; x++) {
+                for (let z = 0; z < 64; z++) {
+                    if (level === srcLevel && x >= srcX && x < srcX + 8 && z >= srcZ && z < srcZ + 8) {
+                        const tx = dstX + RegionRotate.DX(rotation, x & 0x7, z & 0x7);
+                        const tz = dstZ + RegionRotate.DZ(z & 0x7, x & 0x7, rotation);
+                        this.loadGroundSquare(tx, rotation, buf, tz, 0, 0, dstLevel);
+                    } else {
+                        this.loadGroundSquare(-1, 0, buf, -1, 0, 0, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    autoGroundRegion(level: number, x: number, z: number): void {
+        for (let dx = 0; dx < 8; dx++) {
+            for (let dz = 0; dz < 8; dz++) {
+                this.groundh[level][x + dx][z + dz] = 0;
+            }
+        }
+
+        if (x > 0) {
+            for (let dz = 1; dz < 8; dz++) {
+                this.groundh[level][x][z + dz] = this.groundh[level][x - 1][z + dz];
+            }
+        }
+        if (z > 0) {
+            for (let dx = 1; dx < 8; dx++) {
+                this.groundh[level][x + dx][z] = this.groundh[level][x + dx][z - 1];
+            }
+        }
+        if (x > 0 && this.groundh[level][x - 1][z] !== 0) {
+            this.groundh[level][x][z] = this.groundh[level][x - 1][z];
+        } else if (z > 0 && this.groundh[level][x][z - 1] !== 0) {
+            this.groundh[level][x][z] = this.groundh[level][x][z - 1];
+        } else if (x > 0 && z > 0 && this.groundh[level][x - 1][z - 1] !== 0) {
+            this.groundh[level][x][z] = this.groundh[level][x - 1][z - 1];
         }
     }
 
@@ -676,9 +721,10 @@ export default class ClientBuild {
 
                     if (stx > 0 && stz > 0 && stx < 103 && stz < 103) {
                         const loc = LocType.list(locId);
-                        if (shape != 22 || !ClientBuild.lowMem || loc.active || loc.forcedecor) {
+                        if (shape != 22 || !ClientBuild.lowMem || loc.active !== 0 || loc.forcedecor) {
                             if (!loc.checkModelAll()) {
                                 ready = false;
+                                Client.locModelLoadCount++;
                             }
 
                             skip = true;
@@ -689,30 +735,6 @@ export default class ClientBuild {
         }
 
         return ready;
-    }
-
-    static prefetchLocations(buf: Packet, od: OnDemand) {
-        let locId = -1;
-        while (true) {
-            const deltaId = buf.gsmart();
-            if (deltaId == 0) {
-                return;
-            }
-
-            locId += deltaId;
-
-            const loc = LocType.list(locId);
-            loc.prefetchModelAll(od);
-
-            while (true) {
-                const deltaPos = buf.gsmart();
-                if (deltaPos == 0) {
-                    break;
-                }
-
-                buf.g1();
-            }
-        }
     }
 
     loadLocations(src: Uint8Array, xOffset: number, zOffset: number, loopCycle: number, world: World | null, collisions: (CollisionMap | null)[]): void {
@@ -762,15 +784,123 @@ export default class ClientBuild {
         }
     }
 
+    loadLocationsRegion(src: Uint8Array, dstLevel: number, dstX: number, dstZ: number, srcLevel: number, srcX: number, srcZ: number, rotation: number, loopCycle: number, world: World | null, collisions: (CollisionMap | null)[]): void {
+        const buf = new Packet(src);
+        let locId = -1;
+
+        while (true) {
+            const deltaId = buf.gsmart();
+            if (deltaId === 0) {
+                return;
+            }
+
+            locId += deltaId;
+            let locPos = 0;
+
+            while (true) {
+                const deltaPos = buf.gsmart();
+                if (deltaPos === 0) {
+                    break;
+                }
+
+                locPos += deltaPos - 1;
+                const level = locPos >> 12;
+                const x = (locPos >> 6) & 0x3f;
+                const z = locPos & 0x3f;
+                const info = buf.g1();
+                const shape = info >> 2;
+                const locRotation = info & 0x3;
+
+                if (level === srcLevel && x >= srcX && x < srcX + 8 && z >= srcZ && z < srcZ + 8) {
+                    const loc = LocType.list(locId);
+                    const tx = dstX + RegionRotate.DX(locRotation, loc.width, x & 0x7, loc.length, rotation, z & 0x7);
+                    const tz = dstZ + RegionRotate.DZ(z & 0x7, loc.length, x & 0x7, loc.width, rotation, locRotation);
+
+                    if (tx > 0 && tz > 0 && tx < 103 && tz < 103) {
+                        let currentLevel = dstLevel;
+                        if ((this.mapl[1][tx][tz] & MapFlag.LinkBelow) !== 0) {
+                            currentLevel = dstLevel - 1;
+                        }
+
+                        let collision: CollisionMap | null = null;
+                        if (currentLevel >= 0) {
+                            collision = collisions[currentLevel];
+                        }
+                        this.addLoc(dstLevel, tx, tz, locId, shape, (rotation + locRotation) & 0x3, loopCycle, world, collision);
+                    }
+                }
+            }
+        }
+    }
+
+    private loadGroundSquare(x: number, rotation: number, buf: Packet, z: number, originZ: number, originX: number, level: number): void {
+        if (x < 0 || x >= BuildArea.SIZE || z < 0 || z >= BuildArea.SIZE) {
+            while (true) {
+                const opcode = buf.g1();
+                if (opcode === 0) {
+                    break;
+                }
+                if (opcode === 1) {
+                    buf.g1();
+                    break;
+                }
+                if (opcode <= 49) {
+                    buf.g1();
+                }
+            }
+            return;
+        }
+
+        this.mapl[level][x][z] = 0;
+        while (true) {
+            const opcode = buf.g1();
+            if (opcode === 0) {
+                if (level === 0) {
+                    this.groundh[0][x][z] = -ClientBuild.perlinNoise(x + originX + 932731, z + originZ + 556238) * 8;
+                } else {
+                    this.groundh[level][x][z] = this.groundh[level - 1][x][z] - 240;
+                }
+                break;
+            }
+
+            if (opcode === 1) {
+                let height = buf.g1();
+                if (height === 1) {
+                    height = 0;
+                }
+                if (level === 0) {
+                    this.groundh[0][x][z] = -height * 8;
+                } else {
+                    this.groundh[level][x][z] = this.groundh[level - 1][x][z] - height * 8;
+                }
+                break;
+            }
+
+            if (opcode <= 49) {
+                this.floort2[level][x][z] = buf.g1b();
+                this.floors[level][x][z] = (((opcode - 2) / 4) | 0) & 0xff;
+                this.floorr[level][x][z] = (rotation + opcode - 2) & 0x3;
+            } else if (opcode <= 81) {
+                this.mapl[level][x][z] = (opcode - 49) & 0xff;
+            } else {
+                this.floort1[level][x][z] = (opcode - 81) & 0xff;
+            }
+        }
+    }
+
     private addLoc(level: number, x: number, z: number, locId: number, shape: number, angle: number, loopCycle: number, world: World | null, collision: CollisionMap | null): void {
-        if (ClientBuild.lowMem) {
+        if (ClientBuild.lowMem && (this.mapl[0][x][z] & MapFlag.LinkBelow) === 0) {
             if ((this.mapl[level][x][z] & MapFlag.ForceHighDetail) !== 0) {
                 return;
             }
 
-            if (this.getVisBelowLevel(level, x, z) !== ClientBuild.minusedlevel) {
+            if (this.getVisBelowLevel(level, x, z) !== ClientBuild.lastBuiltLevel) {
                 return;
             }
+        }
+
+        if (level < ClientBuild.minusedlevel) {
+            ClientBuild.minusedlevel = level;
         }
 
         let heightSW: number = this.groundh[level][x][z];
@@ -782,34 +912,41 @@ export default class ClientBuild {
         const loc: LocType = LocType.list(locId);
 
         let typecode: number = (x + (z << 7) + (locId << 14) + 0x40000000) | 0;
-        if (!loc.active) {
+        if (loc.active === 0) {
             typecode += -0x80000000; // int.min
         }
         typecode |= 0;
 
-        const typecode2: number = ((((angle << 6) + shape) | 0) << 24) >> 24;
+        let typecode2: number = (((angle << 6) + shape) | 0);
+        if (loc.raiseobject === 1) {
+            typecode2 += 256;
+        }
+
+        if (loc.hasBgSound()) {
+            BgSound.addSound(z, level, angle, x, loc);
+        }
 
         if (shape === LocShape.GROUND_DECOR) {
-            if (!ClientBuild.lowMem || loc.active || loc.forcedecor) {
+            if (!ClientBuild.lowMem || loc.active !== 0 || loc.forcedecor) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(22, angle, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 22, shape, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 22, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setGroundDecor(model, level, x, z, y, typecode, typecode2);
 
-                if (loc.blockwalk && loc.active && collision) {
+                if (loc.blockwalk && loc.active === 1 && collision) {
                     collision.blockGround(x, z);
                 }
             }
         } else if (shape === LocShape.CENTREPIECE_STRAIGHT || shape === LocShape.CENTREPIECE_DIAGONAL) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(10, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 10, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 10, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             if (model) {
@@ -839,7 +976,7 @@ export default class ClientBuild {
                     if (model2) {
                         for (let dx: number = 0; dx <= width; dx++) {
                             for (let dz: number = 0; dz <= height; dz++) {
-                                let shade: number = (model2.radius / 4) | 0;
+                                let shade: number = (model2.getRadius() / 4) | 0;
                                 if (shade > 30) {
                                     shade = 30;
                                 }
@@ -858,10 +995,10 @@ export default class ClientBuild {
             }
         } else if (shape >= LocShape.ROOF_STRAIGHT) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(shape, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.addScenery(level, x, z, y, model, typecode, typecode2, 1, 1, 0);
@@ -875,10 +1012,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_STRAIGHT) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(0, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 0, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 0, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE0[angle], 0, model, null, typecode, typecode2);
@@ -930,10 +1067,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_DIAGONAL_CORNER) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(1, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 1, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 1, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE1[angle], 0, model, null, typecode, typecode2);
@@ -958,12 +1095,12 @@ export default class ClientBuild {
 
             let model1: ModelSource | null;
             let model2: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model1 = loc.getModel(2, angle + 4, heightSW, heightSE, heightNE, heightNW, -1);
                 model2 = loc.getModel(2, offset, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model1 = new ClientLocAnim(loopCycle, locId, 2, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
-                model2 = new ClientLocAnim(loopCycle, locId, 2, offset, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model1 = new ClientLocAnim(locId, 2, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model2 = new ClientLocAnim(locId, 2, offset, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(
@@ -1004,10 +1141,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_SQUARE_CORNER) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(3, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 3, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 3, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE1[angle], 0, model, null, typecode, typecode2);
@@ -1029,10 +1166,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_DIAGONAL) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(shape, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.addScenery(level, x, z, y, model, typecode, typecode2, 1, 1, 0);
@@ -1066,10 +1203,10 @@ export default class ClientBuild {
 
             if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle * 512, ClientBuild.WSHAPE0[angle]);
@@ -1083,10 +1220,10 @@ export default class ClientBuild {
                 }
 
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(
@@ -1104,28 +1241,28 @@ export default class ClientBuild {
                 );
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 256);
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 512);
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 768);
@@ -1141,7 +1278,7 @@ export default class ClientBuild {
         return 0;
     }
 
-    static getTable(hue: number, saturation: number, lightness: number): number {
+    static getTable(saturation: number, lightness: number, hue: number): number {
         if (lightness > 179) {
             saturation = (saturation / 2) | 0;
         }
@@ -1178,7 +1315,7 @@ export default class ClientBuild {
         const loc: LocType = LocType.list(locId);
 
         let typecode: number = (x + (z << 7) + (locId << 14) + 0x40000000) | 0;
-        if (!loc.active) {
+        if (loc.active === 0) {
             typecode += -0x80000000; // int.min
         }
         typecode |= 0;
@@ -1187,23 +1324,23 @@ export default class ClientBuild {
 
         if (shape === LocShape.GROUND_DECOR) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(22, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 22, shape, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 22, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setGroundDecor(model, level, x, z, y, typecode, typecode2);
 
-            if (loc.blockwalk && loc.active && cmap) {
+            if (loc.blockwalk && loc.active === 1 && cmap) {
                 cmap.blockGround(x, z);
             }
         } else if (shape === LocShape.CENTREPIECE_STRAIGHT || shape === LocShape.CENTREPIECE_DIAGONAL) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(10, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 10, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 10, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             if (model) {
@@ -1230,10 +1367,10 @@ export default class ClientBuild {
             }
         } else if (shape >= LocShape.ROOF_STRAIGHT) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(shape, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.addScenery(level, x, z, y, model, typecode, typecode2, 1, 1, 0);
@@ -1243,10 +1380,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_STRAIGHT) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(0, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 0, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 0, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE0[angle], 0, model, null, typecode, typecode2);
@@ -1256,10 +1393,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_DIAGONAL_CORNER) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(1, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 1, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 1, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE1[angle], 0, model, null, typecode, typecode2);
@@ -1272,12 +1409,12 @@ export default class ClientBuild {
 
             let model1: ModelSource | null;
             let model2: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model1 = loc.getModel(2, angle + 4, heightSW, heightSE, heightNE, heightNW, -1);
                 model2 = loc.getModel(2, offset, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model1 = new ClientLocAnim(loopCycle, locId, 2, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
-                model2 = new ClientLocAnim(loopCycle, locId, 2, offset, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model1 = new ClientLocAnim(locId, 2, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model2 = new ClientLocAnim(locId, 2, offset, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE0[angle], ClientBuild.WSHAPE0[offset], model1, model2, typecode, typecode2);
@@ -1287,10 +1424,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_SQUARE_CORNER) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(3, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, 3, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, 3, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.setWall(level, x, z, y, ClientBuild.WSHAPE1[angle], 0, model, null, typecode, typecode2);
@@ -1300,10 +1437,10 @@ export default class ClientBuild {
             }
         } else if (shape === LocShape.WALL_DIAGONAL) {
             let model: ModelSource | null;
-            if (loc.anim === -1) {
+            if (loc.anim === -1 && loc.multiloc === null) {
                 model = loc.getModel(shape, angle, heightSW, heightSE, heightNE, heightNW, -1);
             } else {
-                model = new ClientLocAnim(loopCycle, locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                model = new ClientLocAnim(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
             }
 
             world?.addScenery(level, x, z, y, model, typecode, typecode2, 1, 1, 0);
@@ -1337,10 +1474,10 @@ export default class ClientBuild {
 
             if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle * 512, ClientBuild.WSHAPE0[angle]);
@@ -1354,37 +1491,37 @@ export default class ClientBuild {
                 }
 
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, ClientBuild.DECORXOF[angle] * wallwidth, ClientBuild.DECORZOF[angle] * wallwidth, typecode, model, typecode2, angle * 512, ClientBuild.WSHAPE0[angle]);
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 256);
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 512);
             } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH) {
                 let model: ModelSource | null;
-                if (loc.anim === -1) {
+                if (loc.anim === -1 && loc.multiloc === null) {
                     model = loc.getModel(4, 0, heightSW, heightSE, heightNE, heightNW, -1);
                 } else {
-                    model = new ClientLocAnim(loopCycle, locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                    model = new ClientLocAnim(locId, 4, 0, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
                 }
 
                 world?.setDecor(level, x, z, y, 0, 0, typecode, model, typecode2, angle, 768);

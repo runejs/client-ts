@@ -49,6 +49,33 @@ export default class Database {
         });
     }
 
+    async readMany(archive: number, files: number[]): Promise<Map<number, Uint8Array>> {
+        return await new Promise<Map<number, Uint8Array>>((resolve): void => {
+            const out = new Map<number, Uint8Array>();
+            const transaction: IDBTransaction = this.db.transaction('cache', 'readonly');
+            const store: IDBObjectStore = transaction.objectStore('cache');
+
+            transaction.oncomplete = (): void => {
+                resolve(out);
+            };
+
+            transaction.onerror = (): void => {
+                resolve(out);
+            };
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const request: IDBRequest<Uint8Array | Int8Array | ArrayBuffer> = store.get(`${archive}.${file}`);
+
+                request.onsuccess = (): void => {
+                    if (request.result) {
+                        out.set(file, Database.asUint8Array(request.result));
+                    }
+                };
+            }
+        });
+    }
+
     async cacheload(name: string) {
         return await new Promise<Uint8Array | undefined>((resolve): void => {
             const transaction: IDBTransaction = this.db.transaction('cache', 'readonly');

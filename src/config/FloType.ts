@@ -1,40 +1,53 @@
-import JagFile from '#/io/JagFile.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
+import LruCache from '#/datastruct/LruCache.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
-export default class FloType {
-    static numDefinitions: number = 0;
-    static list: FloType[] = [];
+export default class FloType extends Linkable2 {
+    static recentUse: LruCache<FloType> = new LruCache(64);
+    static configClient: Js5 | null = null;
 
     colour: number = 0;
     texture: number = -1;
-    overlay: boolean = false;
     occlude: boolean = true;
-    debugname: string = '';
+    mapcolour: number = -1;
 
     hue: number = 0;
     saturation: number = 0;
     lightness: number = 0;
+    mapHue: number = 0;
+    mapSaturation: number = 0;
+    mapLightness: number = 0;
 
-    chroma: number = 0;
-    underlayHue: number = 0;
-    overlayHsl: number = 0;
-
-    static init(config: JagFile): void {
-        const dat: Packet = new Packet(config.read('flo.dat'));
-
-        this.numDefinitions = dat.g2();
-        this.list = new Array(this.numDefinitions);
-
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            if (!this.list[id]) {
-                this.list[id] = new FloType();
-            }
-
-            this.list[id].decode(dat);
-        }
+    static init(config: Js5): void {
+        this.configClient = config;
     }
 
-    decode(dat: Packet): void {
+    static resetCache() {
+        FloType.recentUse.clear();
+    }
+
+    static list(id: number): FloType {
+        if (!this.configClient) {
+            return new FloType();
+        }
+
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
+        }
+
+        const src = this.configClient.getFile(id, 4);
+        const flo = new FloType();
+        if (src) {
+            flo.decode(id, new Packet(src));
+        }
+        flo.postDecode();
+        this.recentUse.put(flo, BigInt(id));
+        return flo;
+    }
+
+    decode(id: number, dat: Packet): void {
         while (true) {
             const code = dat.g1();
             if (code === 0) {
@@ -43,19 +56,25 @@ export default class FloType {
 
             if (code === 1) {
                 this.colour = dat.g3();
-                this.getHsl(this.colour);
             } else if (code === 2) {
                 this.texture = dat.g1();
-            } else if (code === 3) {
-                this.overlay = true;
             } else if (code === 5) {
                 this.occlude = false;
-            } else if (code === 6) {
-                this.debugname = dat.gjstr();
-            } else {
-                console.log('Error unrecognised config code: ', code);
+            } else if (code === 7) {
+                this.mapcolour = dat.g3();
             }
         }
+    }
+
+    private postDecode(): void {
+        if (this.mapcolour !== -1) {
+            this.getHsl(this.mapcolour);
+            this.mapHue = this.hue;
+            this.mapSaturation = this.saturation;
+            this.mapLightness = this.lightness;
+        }
+
+        this.getHsl(this.colour);
     }
 
     private getHsl(rgb: number): void {
@@ -118,59 +137,5 @@ export default class FloType {
             this.lightness = 255;
         }
 
-        if (l > 0.5) {
-            this.chroma = ((1.0 - l) * s * 512.0) | 0;
-        } else {
-            this.chroma = (l * s * 512.0) | 0;
-        }
-
-        if (this.chroma < 1) {
-            this.chroma = 1;
-        }
-
-        this.underlayHue = (h * this.chroma) | 0;
-
-        let hue: number = this.hue + ((Math.random() * 16.0) | 0) - 8;
-        if (hue < 0) {
-            hue = 0;
-        } else if (hue > 255) {
-            hue = 255;
-        }
-
-        let saturation: number = this.saturation + ((Math.random() * 48.0) | 0) - 24;
-        if (saturation < 0) {
-            saturation = 0;
-        } else if (saturation > 255) {
-            saturation = 255;
-        }
-
-        let lightness: number = this.lightness + ((Math.random() * 48.0) | 0) - 24;
-        if (lightness < 0) {
-            lightness = 0;
-        } else if (lightness > 255) {
-            lightness = 255;
-        }
-
-        this.overlayHsl = FloType.getTable(hue, saturation, lightness);
-    }
-
-    static getTable(hue: number, saturation: number, lightness: number): number {
-        if (lightness > 179) {
-            saturation = (saturation / 2) | 0;
-        }
-
-        if (lightness > 192) {
-            saturation = (saturation / 2) | 0;
-        }
-
-        if (lightness > 217) {
-            saturation = (saturation / 2) | 0;
-        }
-
-        if (lightness > 243) {
-            saturation = (saturation / 2) | 0;
-        }
-
-        return (((hue / 4) | 0) << 10) + (((saturation / 32) | 0) << 7) + ((lightness / 2) | 0);
     }
 }

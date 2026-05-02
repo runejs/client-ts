@@ -1,25 +1,25 @@
 import LruCache from '#/datastruct/LruCache.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
 
-import AnimFrame from '#/dash3d/AnimFrame.js';
+import SeqType from '#/config/SeqType.js';
 import Model from '#/dash3d/Model.js';
 
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
 import { TypedArray1d } from '#/util/Arrays.js';
+import VarCache from '#/var/VarCache.js';
 
-export default class NpcType {
+export default class NpcType extends Linkable2 {
     static numDefinitions: number = 0;
-    static idx: Int32Array | null = null;
-    static dat: Packet | null = null;
-    static recent: (NpcType | null)[] | null = null;
-    static recentPos: number = 0;
-    static modelCache: LruCache<Model> = new LruCache(30);
+    static models: Js5 | null = null;
+    static configClient: Js5 | null = null;
+    static recentUse: LruCache<NpcType> = new LruCache(64);
+    static modelCache: LruCache<Model> = new LruCache(50);
 
     id: number = -1;
 
     name: string | null = null;
-    desc: string | null = null;
     size: number = 1;
     model: Uint16Array | null = null;
     head: Uint16Array | null = null;
@@ -28,9 +28,12 @@ export default class NpcType {
     walkanim_b: number = -1;
     walkanim_r: number = -1;
     walkanim_l: number = -1;
+    turnleftanim: number = -1;
+    turnrightanim: number = -1;
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     op: (string | null)[] | null = null;
+    active: boolean = true;
     minimap: boolean = true;
     vislevel: number = -1;
     resizeh: number = 128;
@@ -40,46 +43,41 @@ export default class NpcType {
     contrast: number = 0;
     headicon: number = -1;
     turnspeed: number = 32;
+    multivarbit: number = -1;
+    multivarp: number = -1;
+    multinpc: Int32Array | null = null;
 
-    static init(config: JagFile): void {
-        this.dat = new Packet(config.read('npc.dat'));
-        const idx: Packet = new Packet(config.read('npc.idx'));
-
-        this.numDefinitions = idx.g2();
-        this.idx = new Int32Array(this.numDefinitions);
-
-        let offset: number = 2;
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            this.idx[id] = offset;
-            offset += idx.g2();
-        }
-
-        this.recent = new TypedArray1d(20, null);
-        for (let id: number = 0; id < 20; id++) {
-            this.recent[id] = new NpcType();
-        }
+    static init(models: Js5, config: Js5): void {
+        this.models = models;
+        this.configClient = config;
+        this.numDefinitions = config.getFileIdLimit(9);
+        this.recentUse.clear();
     }
 
     static list(id: number): NpcType {
-        if (!this.recent || !this.idx || !this.dat) {
+        if (!this.configClient) {
             throw new Error();
         }
 
-        for (let i: number = 0; i < 20; i++) {
-            const type: NpcType | null = this.recent[i];
-            if (type && type.id === id) {
-                return type;
-            }
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
         }
 
-        this.recentPos = (this.recentPos + 1) % 20;
-
-        const npc: NpcType = (this.recent[this.recentPos] = new NpcType());
-        this.dat.pos = this.idx[id];
+        const npc = new NpcType();
         npc.id = id;
-        npc.decode(this.dat);
+        const data = this.configClient.getFile(id, 9);
+        if (data) {
+            npc.decode(new Packet(data));
+        }
+        this.recentUse.put(npc, BigInt(id));
 
         return npc;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
+        this.modelCache.clear();
     }
 
     decode(dat: Packet): void {
@@ -98,14 +96,16 @@ export default class NpcType {
                 }
             } else if (code === 2) {
                 this.name = dat.gjstr();
-            } else if (code === 3) {
-                this.desc = dat.gjstr();
             } else if (code === 12) {
-                this.size = dat.g1b();
+                this.size = dat.g1();
             } else if (code === 13) {
                 this.readyanim = dat.g2();
             } else if (code === 14) {
                 this.walkanim = dat.g2();
+            } else if (code === 15) {
+                this.turnleftanim = dat.g2();
+            } else if (code === 16) {
+                this.turnrightanim = dat.g2();
             } else if (code === 17) {
                 this.walkanim = dat.g2();
                 this.walkanim_b = dat.g2();
@@ -136,12 +136,6 @@ export default class NpcType {
                 for (let i: number = 0; i < count; i++) {
                     this.head[i] = dat.g2();
                 }
-            } else if (code === 90) {
-                dat.pos += 2;
-            } else if (code === 91) {
-                dat.pos += 2;
-            } else if (code === 92) {
-                dat.pos += 2;
             } else if (code === 93) {
                 this.minimap = false;
             } else if (code === 95) {
@@ -160,17 +154,43 @@ export default class NpcType {
                 this.headicon = dat.g2();
             } else if (code === 103) {
                 this.turnspeed = dat.g2();
+            } else if (code === 106) {
+                this.multivarbit = dat.g2();
+                if (this.multivarbit === 65535) {
+                    this.multivarbit = -1;
+                }
+
+                this.multivarp = dat.g2();
+                if (this.multivarp === 65535) {
+                    this.multivarp = -1;
+                }
+
+                const count = dat.g1();
+                this.multinpc = new Int32Array(count + 1);
+                for (let i = 0; i <= count; i++) {
+                    this.multinpc[i] = dat.g2();
+                    if (this.multinpc[i] === 65535) {
+                        this.multinpc[i] = -1;
+                    }
+                }
+            } else if (code === 107) {
+                this.active = false;
             }
         }
     }
 
-    getTempModel(primaryTransformId: number, secondaryTransformId: number, seqMask: Int32Array | null): Model | null {
+    getTempModel(primary: SeqType | null, secondary: SeqType | null, secondaryFrame: number, primaryFrame: number): Model | null {
+        if (this.multinpc) {
+            const npc = this.getMultiNpc();
+            return npc ? npc.getTempModel(primary, secondary, secondaryFrame, primaryFrame) : null;
+        }
+
         let model = NpcType.modelCache.find(BigInt(this.id));
 
         if (!model && this.model) {
             let ready = false;
             for (let i = 0; i < this.model.length; i++) {
-                if (!Model.requestDownload(this.model[i])) {
+                if (!NpcType.models!.requestDownload(this.model[i], 0)) {
                     ready = true;
                 }
             }
@@ -180,7 +200,7 @@ export default class NpcType {
 
             const models: (Model | null)[] = new TypedArray1d(this.model.length, null);
             for (let i: number = 0; i < this.model.length; i++) {
-                models[i] = Model.load(this.model[i]);
+                models[i] = Model.load(NpcType.models!, this.model[i]);
             }
 
             if (models.length === 1) {
@@ -197,7 +217,7 @@ export default class NpcType {
                 }
 
                 model.prepareAnim();
-                model.calculateNormals(64, 850, -30, -50, -30, true);
+                model.calculateNormals(this.ambient + 64, this.contrast + 850, -30, -50, -30, true);
                 NpcType.modelCache.put(model, BigInt(this.id));
             }
         }
@@ -206,38 +226,37 @@ export default class NpcType {
             return null;
         }
 
-        const tmp = Model.tempModel;
-        tmp.set(model, AnimFrame.animateTransparencies(primaryTransformId) && AnimFrame.animateTransparencies(secondaryTransformId));
-
-        if (primaryTransformId !== -1 && secondaryTransformId !== -1) {
-            tmp.maskAnimate(primaryTransformId, secondaryTransformId, seqMask);
-        } else if (primaryTransformId !== -1) {
-            tmp.animate(primaryTransformId);
+        let tmp: Model;
+        if (primary !== null && secondary !== null) {
+            tmp = primary.splitAnimateModel(model, secondary, primaryFrame, secondaryFrame);
+        } else if (primary !== null) {
+            tmp = primary.animateModel(primaryFrame, model);
+        } else if (secondary === null) {
+            tmp = Model.copyForAnim(model, true, true, false);
+        } else {
+            tmp = secondary.animateModel(secondaryFrame, model);
         }
 
         if (this.resizeh !== 128 || this.resizev !== 128) {
             tmp.resize(this.resizeh, this.resizev, this.resizeh);
         }
 
-        tmp.calcBoundingCylinder();
-        tmp.labelFaces = null;
-        tmp.labelVertices = null;
-
-        if (this.size === 1) {
-            tmp.useAABBMouseCheck = true;
-        }
-
         return tmp;
     }
 
     getHead(): Model | null {
+        if (this.multinpc) {
+            const npc = this.getMultiNpc();
+            return npc ? npc.getHead() : null;
+        }
+
         if (!this.head) {
             return null;
         }
 
         let exists = false;
         for (let i = 0; i < this.head.length; i++) {
-            if (!Model.requestDownload(this.head[i])) {
+            if (!NpcType.models!.requestDownload(this.head[i], 0)) {
                 exists = true;
             }
         }
@@ -247,7 +266,7 @@ export default class NpcType {
 
         const models: (Model | null)[] = new TypedArray1d(this.head.length, null);
         for (let i: number = 0; i < this.head.length; i++) {
-            models[i] = Model.load(this.head[i]);
+            models[i] = Model.load(NpcType.models!, this.head[i]);
         }
 
         let model: Model | null;
@@ -264,5 +283,39 @@ export default class NpcType {
         }
 
         return model;
+    }
+
+    isMultiNpcVisible(): boolean {
+        if (!this.multinpc) {
+            return true;
+        }
+
+        let index = -1;
+        if (this.multivarbit !== -1) {
+            index = VarCache.getVarbit(this.multivarbit);
+        } else if (this.multivarp !== -1) {
+            index = VarCache.var[this.multivarp];
+        }
+
+        return index >= 0 && index < this.multinpc.length && this.multinpc[index] !== -1;
+    }
+
+    getMultiNpc(): NpcType | null {
+        if (!this.multinpc) {
+            return null;
+        }
+
+        let index = -1;
+        if (this.multivarbit !== -1) {
+            index = VarCache.getVarbit(this.multivarbit);
+        } else if (this.multivarp !== -1) {
+            index = VarCache.var[this.multivarp];
+        }
+
+        if (index < 0 || index >= this.multinpc.length || this.multinpc[index] === -1) {
+            return null;
+        }
+
+        return NpcType.list(this.multinpc[index]);
     }
 }

@@ -1,11 +1,11 @@
 import SpotType from '#/config/SpotType.js';
+import SeqType from '#/config/SeqType.js';
 
-import AnimFrame from '#/dash3d/AnimFrame.js';
 import Model from '#/dash3d/Model.js';
 import ModelSource from '#/dash3d/ModelSource.js';
 
 export default class ClientProj extends ModelSource {
-    readonly spotanim: SpotType;
+    readonly spotanim: number;
     readonly level: number;
     readonly srcX: number;
     readonly srcZ: number;
@@ -30,11 +30,12 @@ export default class ClientProj extends ModelSource {
     pitch: number = 0;
     animFrame: number = 0;
     animCycle: number = 0;
+    anim: SeqType | null;
 
-    constructor(spotanim: number, level: number, srcX: number, h1: number, srcZ: number, t1: number, t2: number, angle: number, startpos: number, target: number, h2: number) {
+    constructor(spotanim: number, level: number, srcX: number, srcZ: number, h1: number, t1: number, t2: number, angle: number, startpos: number, target: number, h2: number) {
         super();
 
-        this.spotanim = SpotType.list[spotanim];
+        this.spotanim = spotanim;
         this.level = level;
         this.srcX = srcX;
         this.srcZ = srcZ;
@@ -46,9 +47,11 @@ export default class ClientProj extends ModelSource {
         this.target = target;
         this.h2 = h2;
         this.mobile = false;
+        const anim = SpotType.list(this.spotanim).anim;
+        this.anim = anim === -1 ? null : SeqType.list(anim);
     }
 
-    setTarget(dstX: number, dstY: number, dstZ: number, cycle: number): void {
+    setTarget(cycle: number, dstZ: number, dstY: number, dstX: number): void {
         if (!this.mobile) {
             const dx: number = dstX - this.srcX;
             const dz: number = dstZ - this.srcZ;
@@ -78,13 +81,13 @@ export default class ClientProj extends ModelSource {
         this.yaw = ((Math.atan2(this.velocityX, this.velocityZ) * 325.949 + 1024) | 0) & 0x7ff;
         this.pitch = ((Math.atan2(this.velocityY, this.velocity) * 325.949) | 0) & 0x7ff;
 
-        if (this.spotanim.seq) {
+        if (this.anim) {
             this.animCycle += delta;
 
-            while (this.animCycle > this.spotanim.seq.getDelay(this.animFrame)) {
-                this.animCycle -= this.spotanim.seq.getDelay(this.animFrame) + 1;
+            while (this.anim.delay![this.animFrame] < this.animCycle) {
+                this.animCycle -= this.anim.delay![this.animFrame];
                 this.animFrame++;
-                if (this.animFrame >= this.spotanim.seq.numFrames) {
+                if (this.anim.frames!.length <= this.animFrame) {
                     this.animFrame = 0;
                 }
             }
@@ -92,31 +95,12 @@ export default class ClientProj extends ModelSource {
     }
 
     override getTempModel(): Model | null {
-        const spotModel: Model | null = this.spotanim.getTempModel2();
-        if (!spotModel) {
+        const model: Model | null = SpotType.list(this.spotanim).getTempModel2(this.animFrame);
+        if (!model) {
             return null;
         }
 
-        let frame = -1;
-        if (this.spotanim.seq && this.spotanim.seq.frames) {
-            frame = this.spotanim.seq.frames[this.animFrame];
-        }
-
-        const model: Model = Model.copyForAnim(spotModel, true, AnimFrame.animateTransparencies(frame), false);
-
-        if (frame !== -1) {
-            model.prepareAnim();
-            model.animate(frame);
-            model.labelFaces = null;
-            model.labelVertices = null;
-        }
-
-        if (this.spotanim.resizeh !== 128 || this.spotanim.resizev !== 128) {
-            model.resize(this.spotanim.resizeh, this.spotanim.resizev, this.spotanim.resizeh);
-        }
-
         model.rotateXAxis(this.pitch);
-        model.calculateNormals(64 + this.spotanim.ambient, 850 + this.spotanim.contrast, -30, -50, -30, true);
         return model;
     }
 }

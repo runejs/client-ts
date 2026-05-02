@@ -1,32 +1,42 @@
-import JagFile from '#/io/JagFile.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
+import LruCache from '#/datastruct/LruCache.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
-export default class VarBitType {
+export default class VarBitType extends Linkable2 {
     static numDefinitions: number = 0;
-    static list: VarBitType[] = [];
+    static recentUse: LruCache<VarBitType> = new LruCache(64);
+    static configClient: Js5 | null = null;
 
     basevar: number = -1;
     startbit: number = 0;
     endbit: number = 0;
-    debugname: string = '';
+    static init(config: Js5): void {
+        this.configClient = config;
+        this.numDefinitions = config.getFileIdLimit(14);
+    }
 
-    static init(config: JagFile): void {
-        const dat: Packet = new Packet(config.read('varbit.dat'));
-
-        this.numDefinitions = dat.g2();
-        this.list = new Array(this.numDefinitions);
-
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            if (!this.list[id]) {
-                this.list[id] = new VarBitType();
-            }
-
-            this.list[id].decode(dat);
+    static list(id: number): VarBitType {
+        if (!this.configClient) {
+            throw new Error();
         }
 
-        if (dat.pos != dat.data.length) {
-            console.log('varbit load mismatch');
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
         }
+
+        const varbit = new VarBitType();
+        const data = this.configClient.getFile(id, 14);
+        if (data) {
+            varbit.decode(new Packet(data));
+        }
+        this.recentUse.put(varbit, BigInt(id));
+        return varbit;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
     }
 
     decode(dat: Packet): void {
@@ -40,10 +50,6 @@ export default class VarBitType {
                 this.basevar = dat.g2();
                 this.startbit = dat.g1();
                 this.endbit = dat.g1();
-            } else if (code === 10) {
-                this.debugname = dat.gjstr();
-            } else {
-                console.log('Error unrecognised config code: ', code);
             }
         }
     }

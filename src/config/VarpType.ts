@@ -1,29 +1,41 @@
-import JagFile from '#/io/JagFile.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
+import LruCache from '#/datastruct/LruCache.js';
 import Packet from '#/io/Packet.js';
+import type Js5 from '#/js5/Js5.js';
 
-export default class VarpType {
+export default class VarpType extends Linkable2 {
     static numDefinitions: number = 0;
-    static list: VarpType[] = [];
+    static recentUse: LruCache<VarpType> = new LruCache(64);
+    static configClient: Js5 | null = null;
 
     clientcode: number = 0;
 
-    static init(config: JagFile): void {
-        const dat: Packet = new Packet(config.read('varp.dat'));
+    static init(config: Js5): void {
+        this.configClient = config;
+        this.numDefinitions = config.getFileIdLimit(16);
+    }
 
-        this.numDefinitions = dat.g2();
-        this.list = new Array(this.numDefinitions);
-
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            if (!this.list[id]) {
-                this.list[id] = new VarpType();
-            }
-
-            this.list[id].decode(dat);
+    static list(id: number): VarpType {
+        if (!this.configClient) {
+            throw new Error();
         }
 
-        if (dat.pos != dat.data.length) {
-            console.log('varptype load mismatch');
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
         }
+
+        const varp = new VarpType();
+        const data = this.configClient.getFile(id, 16);
+        if (data) {
+            varp.decode(new Packet(data));
+        }
+        this.recentUse.put(varp, BigInt(id));
+        return varp;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
     }
 
     decode(dat: Packet): void {
@@ -33,28 +45,8 @@ export default class VarpType {
                 break;
             }
 
-            if (code === 1) {
-                dat.pos += 1;
-            } else if (code === 2) {
-                dat.pos += 1;
-            } else if (code === 3) {
-                // server-side
-            } else if (code === 4) {
-                // server-side
-            } else if (code === 5) {
+            if (code === 5) {
                 this.clientcode = dat.g2();
-            } else if (code === 6) {
-                // server-side
-            } else if (code === 7) {
-                dat.pos += 4;
-            } else if (code === 8) {
-                // server-side
-            } else if (code === 10) {
-                dat.gjstr();
-            } else if (code === 11) {
-                // server-side
-            } else {
-                console.log('Error unrecognised config code: ', code);
             }
         }
     }

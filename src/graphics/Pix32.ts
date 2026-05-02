@@ -2,8 +2,9 @@ import Pix2D from '#/graphics/Pix2D.js';
 import { decodeJpeg } from '#/graphics/Jpeg.js';
 import Pix8 from '#/graphics/Pix8.js';
 
-import JagFile from '#/io/JagFile.js';
-import Packet from '#/io/Packet.js';
+interface ArchiveReader {
+    read(name: string): Uint8Array | null;
+}
 
 export default class Pix32 extends Pix2D {
     data: Int32Array;
@@ -14,7 +15,7 @@ export default class Pix32 extends Pix2D {
     owi: number; // original width
     ohi: number; // original height
 
-    constructor(width: number, height: number) {
+    constructor(width: number = 0, height: number = 0) {
         super();
 
         this.data = new Int32Array(width * height);
@@ -23,12 +24,16 @@ export default class Pix32 extends Pix2D {
         this.xof = this.yof = 0;
     }
 
-    static async fromJpeg(archive: JagFile, name: string): Promise<Pix32> {
+    static async fromJpeg(archive: ArchiveReader, name: string): Promise<Pix32> {
         const dat: Uint8Array | null = archive.read(name);
         if (!dat) {
             throw new Error();
         }
 
+        return this.fromBytes(dat);
+    }
+
+    static async fromBytes(dat: Uint8Array): Promise<Pix32> {
         const jpeg: ImageData = await decodeJpeg(dat);
         const image: Pix32 = new Pix32(jpeg.width, jpeg.height);
 
@@ -40,64 +45,181 @@ export default class Pix32 extends Pix2D {
         return image;
     }
 
-    static depack(jag: JagFile, name: string, sprite: number = 0): Pix32 {
-        const dat: Packet = new Packet(jag.read(name + '.dat'));
-        const index: Packet = new Packet(jag.read('index.dat'));
-
-        index.pos = dat.g2();
-        const owi: number = index.g2();
-        const ohi: number = index.g2();
-
-        const bpalCount: number = index.g1();
-        const bpal: Int32Array = new Int32Array(bpalCount);
-
-        for (let i: number = 0; i < bpalCount - 1; i++) {
-            bpal[i + 1] = index.g3();
-
-            if (bpal[i + 1] === 0) {
-                bpal[i + 1] = 1;
-            }
-        }
-
-        for (let i: number = 0; i < sprite; i++) {
-            index.pos += 2;
-            dat.pos += index.g2() * index.g2();
-            index.pos += 1;
-        }
-
-        if (dat.pos > dat.length || index.pos > index.length) {
-            throw new Error();
-        }
-
-        const xof: number = index.g1();
-        const yof: number = index.g1();
-        const wi: number = index.g2();
-        const hi: number = index.g2();
-
-        const image: Pix32 = new Pix32(wi, hi);
-        image.xof = xof;
-        image.yof = yof;
-        image.owi = owi;
-        image.ohi = ohi;
-
-        const encoding: number = index.g1();
-        if (encoding === 0) {
-            for (let i: number = 0; i < image.wi * image.hi; i++) {
-                image.data[i] = bpal[dat.g1()];
-            }
-        } else if (encoding === 1) {
-            for (let x: number = 0; x < image.wi; x++) {
-                for (let y: number = 0; y < image.hi; y++) {
-                    image.data[x + y * image.wi] = bpal[dat.g1()];
-                }
-            }
-        }
-
-        return image;
-    }
-
     setPixels(): void {
         Pix2D.setPixels(this.data, this.wi, this.hi);
+    }
+
+    static litSprite(dst: Int32Array, src: Int32Array, srcX: number, srcY: number, dstOff: number, dstStep: number, w: number, h: number, scaleX: number, scaleY: number, srcWidth: number): void {
+        const startX: number = srcX;
+        for (let y: number = -h; y < 0; y++) {
+            const offY: number = (srcY >> 16) * srcWidth;
+            for (let x: number = -w; x < 0; x++) {
+                const rgb: number = src[(srcX >> 16) + offY];
+                if (rgb === 0) {
+                    dstOff++;
+                } else {
+                    dst[dstOff++] = rgb;
+                }
+                srcX += scaleX;
+            }
+
+            srcY += scaleY;
+            srcX = startX;
+            dstOff += dstStep;
+        }
+    }
+
+    scalePlotSprite(x: number, y: number, w: number, h: number): void {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+
+        const width: number = this.wi;
+        const height: number = this.hi;
+        let srcX: number = 0;
+        let srcY: number = 0;
+        const fullWidth: number = this.owi;
+        const fullHeight: number = this.ohi;
+        const scaleX: number = ((fullWidth << 16) / w) | 0;
+        const scaleY: number = ((fullHeight << 16) / h) | 0;
+
+        if (this.xof > 0) {
+            const cutoff: number = (((this.xof << 16) + scaleX - 1) / scaleX) | 0;
+            x += cutoff;
+            srcX = scaleX * cutoff - (this.xof << 16);
+        }
+
+        if (this.yof > 0) {
+            const cutoff: number = (((this.yof << 16) + scaleY - 1) / scaleY) | 0;
+            y += cutoff;
+            srcY = scaleY * cutoff - (this.yof << 16);
+        }
+
+        if (width < fullWidth) {
+            w = (((width << 16) + scaleX - srcX - 1) / scaleX) | 0;
+        }
+
+        if (height < fullHeight) {
+            h = (((height << 16) + scaleY - srcY - 1) / scaleY) | 0;
+        }
+
+        let dstOff: number = Pix2D.width * y + x;
+        let dstStep: number = Pix2D.width - w;
+
+        if (y + h > Pix2D.clipMaxY) {
+            h -= y + h - Pix2D.clipMaxY;
+        }
+
+        if (y < Pix2D.clipMinY) {
+            const cutoff: number = Pix2D.clipMinY - y;
+            h -= cutoff;
+            dstOff += Pix2D.width * cutoff;
+            srcY += scaleY * cutoff;
+        }
+
+        if (x + w > Pix2D.clipMaxX) {
+            const cutoff: number = x + w - Pix2D.clipMaxX;
+            w -= cutoff;
+            dstStep += cutoff;
+        }
+
+        if (x < Pix2D.clipMinX) {
+            const cutoff: number = Pix2D.clipMinX - x;
+            w -= cutoff;
+            dstOff += cutoff;
+            srcX += scaleX * cutoff;
+            dstStep += cutoff;
+        }
+
+        Pix32.litSprite(Pix2D.pixels, this.data, srcX, srcY, dstOff, dstStep, w, h, scaleX, scaleY, width);
+    }
+
+    transScalePlotSprite(x: number, y: number, w: number, h: number, alpha: number): void {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+
+        const width: number = this.wi;
+        const height: number = this.hi;
+        let srcX: number = 0;
+        let srcY: number = 0;
+        const fullWidth: number = this.owi;
+        const fullHeight: number = this.ohi;
+        const scaleX: number = ((fullWidth << 16) / w) | 0;
+        const scaleY: number = ((fullHeight << 16) / h) | 0;
+
+        if (this.xof > 0) {
+            const cutoff: number = (((this.xof << 16) + scaleX - 1) / scaleX) | 0;
+            x += cutoff;
+            srcX = scaleX * cutoff - (this.xof << 16);
+        }
+
+        if (this.yof > 0) {
+            const cutoff: number = (((this.yof << 16) + scaleY - 1) / scaleY) | 0;
+            y += cutoff;
+            srcY = scaleY * cutoff - (this.yof << 16);
+        }
+
+        if (width < fullWidth) {
+            w = (((width << 16) + scaleX - srcX - 1) / scaleX) | 0;
+        }
+
+        if (height < fullHeight) {
+            h = (((height << 16) + scaleY - srcY - 1) / scaleY) | 0;
+        }
+
+        let dstOff: number = Pix2D.width * y + x;
+        let dstStep: number = Pix2D.width - w;
+
+        if (y + h > Pix2D.clipMaxY) {
+            h -= y + h - Pix2D.clipMaxY;
+        }
+
+        if (y < Pix2D.clipMinY) {
+            const cutoff: number = Pix2D.clipMinY - y;
+            h -= cutoff;
+            dstOff += Pix2D.width * cutoff;
+            srcY += scaleY * cutoff;
+        }
+
+        if (x + w > Pix2D.clipMaxX) {
+            const cutoff: number = x + w - Pix2D.clipMaxX;
+            w -= cutoff;
+            dstStep += cutoff;
+        }
+
+        if (x < Pix2D.clipMinX) {
+            const cutoff: number = Pix2D.clipMinX - x;
+            w -= cutoff;
+            dstOff += cutoff;
+            srcX += scaleX * cutoff;
+            dstStep += cutoff;
+        }
+
+        Pix32.plotScale(Pix2D.pixels, this.data, srcX, srcY, dstOff, dstStep, w, h, scaleX, scaleY, width, alpha);
+    }
+
+    static plotScale(dst: Int32Array, src: Int32Array, srcX: number, srcY: number, dstOff: number, dstStep: number, w: number, h: number, scaleX: number, scaleY: number, srcWidth: number, alpha: number): void {
+        const invAlpha: number = 256 - alpha;
+        const startX: number = srcX;
+
+        for (let y: number = -h; y < 0; y++) {
+            const offY: number = (srcY >> 16) * srcWidth;
+            for (let x: number = -w; x < 0; x++) {
+                const rgb: number = src[(srcX >> 16) + offY];
+                if (rgb === 0) {
+                    dstOff++;
+                } else {
+                    const dstRgb: number = dst[dstOff];
+                    dst[dstOff++] = (((rgb & 0xff00ff) * alpha + (dstRgb & 0xff00ff) * invAlpha) & 0xff00ff00) + (((rgb & 0xff00) * alpha + (dstRgb & 0xff00) * invAlpha) & 0xff0000) >> 8;
+                }
+                srcX += scaleX;
+            }
+
+            srcY += scaleY;
+            srcX = startX;
+            dstOff += dstStep;
+        }
     }
 
     rgbAdjust(r: number, g: number, b: number): void {
@@ -150,38 +272,31 @@ export default class Pix32 extends Pix2D {
     }
 
     hflip(): void {
-        const pixels: Int32Array = this.data;
-        const width: number = this.wi;
-        const height: number = this.hi;
+        const pixels: Int32Array = new Int32Array(this.hi * this.wi);
+        let off: number = 0;
 
-        for (let y: number = 0; y < height; y++) {
-            const div: number = (width / 2) | 0;
-            for (let x: number = 0; x < div; x++) {
-                const off1: number = x + y * width;
-                const off2: number = width - x - 1 + y * width;
-
-                const tmp: number = pixels[off1];
-                pixels[off1] = pixels[off2];
-                pixels[off2] = tmp;
+        for (let y: number = 0; y < this.hi; y++) {
+            for (let x: number = this.wi - 1; x >= 0; x--) {
+                pixels[off++] = this.data[this.wi * y + x];
             }
         }
+
+        this.data = pixels;
+        this.xof = this.owi - this.wi - this.xof;
     }
 
     vflip(): void {
-        const pixels: Int32Array = this.data;
-        const width: number = this.wi;
-        const height: number = this.hi;
+        const pixels: Int32Array = new Int32Array(this.hi * this.wi);
+        let off: number = 0;
 
-        for (let y: number = 0; y < ((height / 2) | 0); y++) {
-            for (let x: number = 0; x < width; x++) {
-                const off1: number = x + y * width;
-                const off2: number = x + (height - y - 1) * width;
-
-                const tmp: number = pixels[off1];
-                pixels[off1] = pixels[off2];
-                pixels[off2] = tmp;
+        for (let y: number = this.hi - 1; y >= 0; y--) {
+            for (let x: number = 0; x < this.wi; x++) {
+                pixels[off++] = this.data[this.wi * y + x];
             }
         }
+
+        this.data = pixels;
+        this.yof = this.ohi - this.hi - this.yof;
     }
 
     quickPlotSprite(x: number, y: number): void {
@@ -462,9 +577,48 @@ export default class Pix32 extends Pix2D {
         }
     }
 
-    rotatePlotSprite(x: number, y: number, w: number, h: number, anchorX: number, anchorY: number, theta: number, zoom: number): void {
+    rotatePlotSprite(x: number, y: number, theta: number): void;
+    rotatePlotSprite(x: number, y: number, w: number, h: number, anchorX: number, anchorY: number, theta: number, zoom: number): void;
+    rotatePlotSprite(x: number, y: number, w: number, h?: number, anchorX?: number, anchorY?: number, theta?: number, zoom?: number): void {
         x |= 0;
         y |= 0;
+
+        if (h === undefined || anchorX === undefined || anchorY === undefined || theta === undefined || zoom === undefined) {
+            try {
+                const sin: number = (Math.sin(w) * 65536.0) | 0;
+                const cos: number = (Math.cos(w) * 65536.0) | 0;
+                const sinZoom: number = (sin * 256) >> 8;
+                const cosZoom: number = (cos * 256) >> 8;
+                let leftX: number = sinZoom * -10 + cosZoom * -10 + 983040;
+                let leftY: number = cosZoom * -10 + 983040 - sinZoom * -10;
+                let leftOff: number = Pix2D.width * y + x;
+
+                for (let i: number = 0; i < 20; i++) {
+                    let dstOff: number = leftOff;
+                    let srcX: number = leftX;
+                    let srcY: number = leftY;
+
+                    for (let j: number = -20; j < 0; j++) {
+                        const rgb: number = this.data[(srcX >> 16) + (srcY >> 16) * this.wi];
+                        if (rgb === 0) {
+                            dstOff++;
+                        } else {
+                            Pix2D.pixels[dstOff++] = rgb;
+                        }
+                        srcX += cosZoom;
+                        srcY -= sinZoom;
+                    }
+
+                    leftX += sinZoom;
+                    leftY += cosZoom;
+                    leftOff += Pix2D.width;
+                }
+            } catch (_e) {
+                // empty
+            }
+            return;
+        }
+
         w |= 0;
         h |= 0;
 

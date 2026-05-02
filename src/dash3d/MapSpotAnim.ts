@@ -1,11 +1,11 @@
 import SpotType from '#/config/SpotType.js';
-import Model from '#/dash3d/Model.js';
+import SeqType from '#/config/SeqType.js';
 
-import AnimFrame from '#/dash3d/AnimFrame.js';
+import type Model from '#/dash3d/Model.js';
 import ModelSource from '#/dash3d/ModelSource.js';
 
 export default class MapSpotAnim extends ModelSource {
-    readonly type: SpotType;
+    readonly type: number;
     readonly level: number;
     readonly x: number;
     readonly z: number;
@@ -15,72 +15,43 @@ export default class MapSpotAnim extends ModelSource {
     animComplete: boolean = false;
     animFrame: number = 0;
     animCycle: number = 0;
+    anim: SeqType | null = null;
 
     constructor(id: number, level: number, x: number, z: number, y: number, cycle: number, delay: number) {
         super();
 
-        this.type = SpotType.list[id];
+        this.type = id;
         this.level = level;
         this.x = x;
         this.z = z;
         this.y = y;
         this.startCycle = cycle + delay;
+        const anim = SpotType.list(this.type).anim;
+        if (anim === -1) {
+            this.animComplete = true;
+        } else {
+            this.animComplete = false;
+            this.anim = SeqType.list(anim);
+        }
     }
 
     update(delta: number): void {
-        if (!this.type.seq) {
+        if (this.animComplete || !this.anim) {
             return;
         }
 
-        for (this.animCycle += delta; this.animCycle > this.type.seq.getDelay(this.animFrame); ) {
-            this.animCycle -= this.type.seq.getDelay(this.animFrame) + 1;
+        for (this.animCycle += delta; this.animCycle > this.anim.delay![this.animFrame]; ) {
+            this.animCycle -= this.anim.delay![this.animFrame];
             this.animFrame++;
 
-            if (this.animFrame >= this.type.seq.numFrames) {
-                this.animFrame = 0;
+            if (this.anim.frames!.length <= this.animFrame) {
                 this.animComplete = true;
+                return;
             }
         }
     }
 
     override getTempModel(): Model | null {
-        const tmp: Model | null = this.type.getTempModel2();
-        if (!tmp) {
-            return null;
-        }
-
-        let frame = -1;
-        if (this.type.seq && this.type.seq.frames) {
-            frame = this.type.seq.frames[this.animFrame];
-        }
-
-        const model: Model = Model.copyForAnim(tmp, true, AnimFrame.animateTransparencies(frame), false);
-
-        if (!this.animComplete) {
-            model.prepareAnim();
-            model.animate(frame);
-            model.labelFaces = null;
-            model.labelVertices = null;
-        }
-
-        if (this.type.resizeh !== 128 || this.type.resizev !== 128) {
-            model.resize(this.type.resizeh, this.type.resizev, this.type.resizeh);
-        }
-
-        if (this.type.angle !== 0) {
-            if (this.type.angle === 90) {
-                model.rotate90();
-            } else if (this.type.angle === 180) {
-                model.rotate90();
-                model.rotate90();
-            } else if (this.type.angle === 270) {
-                model.rotate90();
-                model.rotate90();
-                model.rotate90();
-            }
-        }
-
-        model.calculateNormals(64 + this.type.ambient, 850 + this.type.contrast, -30, -50, -30, true);
-        return model;
+        return SpotType.list(this.type).getTempModel2(this.animComplete ? -1 : this.animFrame);
     }
 }

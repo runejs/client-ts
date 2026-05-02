@@ -1,40 +1,41 @@
 import LruCache from '#/datastruct/LruCache.js';
+import Linkable2 from '#/datastruct/Linkable2.js';
 
-import AnimFrame from '#/dash3d/AnimFrame.js';
+import SeqType from '#/config/SeqType.js';
 import { LocShape } from '#/dash3d/LocShape.js';
 import { LocAngle } from '#/dash3d/LocAngle.js';
 
 import Model from '#/dash3d/Model.js';
 
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
 
 import { TypedArray1d } from '#/util/Arrays.js';
-import type OnDemand from '#/io/OnDemand.js';
+import VarCache from '#/var/VarCache.js';
+import type Js5 from '#/js5/Js5.js';
 
-export default class LocType {
+export default class LocType extends Linkable2 {
     static numDefinitions: number = 0;
-    static idx: Int32Array | null = null;
-    static dat: Packet | null = null;
-    static recent: (LocType | null)[] | null = null;
-    static recentPos: number = 0;
+    static recentUse: LruCache<LocType> = new LruCache(64);
     static mc1: LruCache<Model> = new LruCache(500);
-    static mc2: LruCache<Model> = new LruCache(30);
+    static mc2: LruCache<Model> = new LruCache(10);
+    static mc3: LruCache<Model> = new LruCache(30);
     static temp: Model[] = new Array(4);
+    static models: Js5 | null = null;
+    static configClient: Js5 | null = null;
+    static lowMem: boolean = false;
 
     id: number = -1;
 
     model: Int32Array | null = null;
     shape: Int32Array | null = null;
     name: string | null = null;
-    desc: string | null = null;
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     width: number = 1;
     length: number = 1;
     blockwalk: boolean = true;
     blockrange: boolean = true;
-    active: boolean = false;
+    active: number = -1;
     hillskew: boolean = false;
     sharelight: boolean = false;
     occlude: boolean = false;
@@ -57,61 +58,64 @@ export default class LocType {
     forcedecor: boolean = false;
     breakroutefinding: boolean = false;
     raiseobject: number = 0;
+    multiloc: Int32Array | null = null;
+    multivarp: number = -1;
+    multivarbit: number = -1;
+    bgsound_sound: number = -1;
+    bgsound_range: number = 0;
+    bgsound_mindelay: number = 0;
+    bgsound_maxdelay: number = 0;
+    bgsound_random: Int32Array | null = null;
 
-    static init(config: JagFile): void {
-        this.dat = new Packet(config.read('loc.dat'));
-        const idx: Packet = new Packet(config.read('loc.idx'));
-
-        this.numDefinitions = idx.g2();
-        this.idx = new Int32Array(this.numDefinitions);
-
-        let offset: number = 2;
-        for (let id: number = 0; id < this.numDefinitions; id++) {
-            this.idx[id] = offset;
-            offset += idx.g2();
-        }
-
-        this.recent = new TypedArray1d(10, null);
-        for (let id: number = 0; id < 10; id++) {
-            this.recent[id] = new LocType();
-        }
+    static init(models: Js5, lowMem: boolean, config: Js5): void {
+        this.models = models;
+        this.configClient = config;
+        this.lowMem = lowMem;
+        this.numDefinitions = config.getFileIdLimit(6);
+        this.recentUse.clear();
     }
 
     static list(id: number): LocType {
-        if (!this.recent || !this.idx || !this.dat) {
+        if (!this.configClient) {
             throw new Error();
         }
 
-        for (let i: number = 0; i < 10; i++) {
-            const type: LocType | null = this.recent[i];
-            if (type && type.id === id) {
-                return type;
-            }
+        const cached = this.recentUse.find(BigInt(id));
+        if (cached) {
+            return cached;
         }
 
-        this.recentPos = (this.recentPos + 1) % 10;
-
-        const loc: LocType = this.recent[this.recentPos]!;
-        this.dat.pos = this.idx[id];
+        const loc = new LocType();
         loc.id = id;
         loc.reset();
-        loc.decode(this.dat);
+        const data = this.configClient.getFile(id, 6);
+        if (data) {
+            loc.decode(new Packet(data));
+        }
+        loc.postDecode();
+        this.recentUse.put(loc, BigInt(id));
 
         return loc;
+    }
+
+    static resetCache(): void {
+        this.recentUse.clear();
+        this.mc1.clear();
+        this.mc2.clear();
+        this.mc3.clear();
     }
 
     private reset(): void {
         this.model = null;
         this.shape = null;
         this.name = null;
-        this.desc = null;
         this.recol_s = null;
         this.recol_d = null;
         this.width = 1;
         this.length = 1;
         this.blockwalk = true;
         this.blockrange = true;
-        this.active = false;
+        this.active = -1;
         this.hillskew = false;
         this.sharelight = false;
         this.occlude = false;
@@ -134,36 +138,78 @@ export default class LocType {
         this.forcedecor = false;
         this.breakroutefinding = false;
         this.raiseobject = -1;
+        this.multiloc = null;
+        this.multivarp = -1;
+        this.multivarbit = -1;
+        this.bgsound_sound = -1;
+        this.bgsound_range = 0;
+        this.bgsound_mindelay = 0;
+        this.bgsound_maxdelay = 0;
+        this.bgsound_random = null;
+    }
+
+    private postDecode(): void {
+        if (this.active === -1) {
+            this.active = 0;
+            if (this.model && (!this.shape || this.shape[0] === LocShape.CENTREPIECE_STRAIGHT)) {
+                this.active = 1;
+            }
+
+            if (this.op) {
+                for (let i = 0; i < this.op.length; i++) {
+                    if (this.op[i] !== null) {
+                        this.active = 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (this.breakroutefinding) {
+            this.blockwalk = false;
+            this.blockrange = false;
+        }
+
+        if (this.raiseobject === -1) {
+            this.raiseobject = this.blockwalk ? 1 : 0;
+        }
     }
 
     decode(dat: Packet): void {
-        let active = -1;
         while (true) {
             const code = dat.g1();
             if (code === 0) {
-                break;
+                return;
             }
 
             if (code === 1) {
-                const count: number = dat.g1();
-                this.model = new Int32Array(count);
-                this.shape = new Int32Array(count);
-
-                for (let i: number = 0; i < count; i++) {
-                    this.model[i] = dat.g2();
-                    this.shape[i] = dat.g1();
+                const count = dat.g1();
+                if (count > 0) {
+                    if (!this.model || LocType.lowMem) {
+                        this.shape = new Int32Array(count);
+                        this.model = new Int32Array(count);
+                        for (let i = 0; i < count; i++) {
+                            this.model[i] = dat.g2();
+                            this.shape[i] = dat.g1();
+                        }
+                    } else {
+                        dat.pos += count * 3;
+                    }
                 }
             } else if (code === 2) {
                 this.name = dat.gjstr();
-            } else if (code === 3) {
-                this.desc = dat.gjstr();
             } else if (code === 5) {
-                const count: number = dat.g1();
-                this.model = new Int32Array(count);
-                this.shape = null;
-
-                for (let i: number = 0; i < count; i++) {
-                    this.model[i] = dat.g2();
+                const count = dat.g1();
+                if (count > 0) {
+                    if (!this.model || LocType.lowMem) {
+                        this.shape = null;
+                        this.model = new Int32Array(count);
+                        for (let i = 0; i < count; i++) {
+                            this.model[i] = dat.g2();
+                        }
+                    } else {
+                        dat.pos += count * 2;
+                    }
                 }
             } else if (code === 14) {
                 this.width = dat.g1();
@@ -174,10 +220,7 @@ export default class LocType {
             } else if (code === 18) {
                 this.blockrange = false;
             } else if (code === 19) {
-                active = dat.g1();
-                if (active === 1) {
-                    this.active = true;
-                }
+                this.active = dat.g1();
             } else if (code === 21) {
                 this.hillskew = true;
             } else if (code === 22) {
@@ -186,7 +229,6 @@ export default class LocType {
                 this.occlude = true;
             } else if (code === 24) {
                 this.anim = dat.g2();
-
                 if (this.anim === 65535) {
                     this.anim = -1;
                 }
@@ -195,22 +237,20 @@ export default class LocType {
             } else if (code === 29) {
                 this.ambient = dat.g1b();
             } else if (code === 39) {
-                this.contrast = dat.g1b();
-            } else if (code >= 30 && code < 39) {
+                this.contrast = dat.g1b() * 5;
+            } else if (code >= 30 && code < 35) {
                 if (!this.op) {
                     this.op = new TypedArray1d(5, null);
                 }
-
                 this.op[code - 30] = dat.gjstr();
                 if (this.op[code - 30]?.toLowerCase() === 'hidden') {
                     this.op[code - 30] = null;
                 }
             } else if (code === 40) {
-                const count: number = dat.g1();
+                const count = dat.g1();
                 this.recol_s = new Uint16Array(count);
                 this.recol_d = new Uint16Array(count);
-
-                for (let i: number = 0; i < count; i++) {
+                for (let i = 0; i < count; i++) {
                     this.recol_s[i] = dat.g2();
                     this.recol_d[i] = dat.g2();
                 }
@@ -242,28 +282,36 @@ export default class LocType {
                 this.breakroutefinding = true;
             } else if (code === 75) {
                 this.raiseobject = dat.g1();
+            } else if (code === 77) {
+                this.multivarbit = dat.g2();
+                if (this.multivarbit === 65535) {
+                    this.multivarbit = -1;
+                }
+                this.multivarp = dat.g2();
+                if (this.multivarp === 65535) {
+                    this.multivarp = -1;
+                }
+                const count = dat.g1();
+                this.multiloc = new Int32Array(count + 1);
+                for (let i = 0; i <= count; i++) {
+                    this.multiloc[i] = dat.g2();
+                    if (this.multiloc[i] === 65535) {
+                        this.multiloc[i] = -1;
+                    }
+                }
+            } else if (code === 78) {
+                this.bgsound_sound = dat.g2();
+                this.bgsound_range = dat.g1();
+            } else if (code === 79) {
+                this.bgsound_mindelay = dat.g2();
+                this.bgsound_maxdelay = dat.g2();
+                this.bgsound_range = dat.g1();
+                const count = dat.g1();
+                this.bgsound_random = new Int32Array(count);
+                for (let i = 0; i < count; i++) {
+                    this.bgsound_random[i] = dat.g2();
+                }
             }
-        }
-
-        if (active === -1) {
-            this.active = false;
-
-            if (this.model && (!this.shape || (this.shape && this.shape[0] === LocShape.CENTREPIECE_STRAIGHT))) {
-                this.active = true;
-            }
-
-            if (this.op) {
-                this.active = true;
-            }
-        }
-
-        if (this.breakroutefinding) {
-            this.blockwalk = false;
-            this.blockrange = false;
-        }
-
-        if (this.raiseobject === -1) {
-            this.raiseobject = this.blockwalk ? 1 : 0;
         }
     }
 
@@ -275,7 +323,7 @@ export default class LocType {
         if (this.shape !== null) {
             for (let i = 0; i < this.shape.length; i++) {
                 if (this.shape[i] === shape) {
-                    return Model.requestDownload(this.model[i] & 0xFFFF);
+                    return LocType.models!.requestDownload(this.model[i] & 0xFFFF, 0);
                 }
             }
             return true;
@@ -283,7 +331,7 @@ export default class LocType {
             let ready = true;
             for (let i = 0; i < this.model.length; i++) {
                 const model = this.model[i];
-                if (!Model.requestDownload(model & 0xFFFF)) {
+                if (!LocType.models!.requestDownload(model & 0xFFFF, 0)) {
                     ready = false;
                 }
             }
@@ -291,6 +339,23 @@ export default class LocType {
         }
 
         return true;
+    }
+
+    hasBgSound(): boolean {
+        if (this.multiloc === null) {
+            return this.bgsound_sound !== -1 || this.bgsound_random !== null;
+        }
+
+        for (let i = 0; i < this.multiloc.length; i++) {
+            if (this.multiloc[i] !== -1) {
+                const loc = LocType.list(this.multiloc[i]);
+                if (loc.bgsound_sound !== -1 || loc.bgsound_random !== null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     checkModelAll(): boolean {
@@ -301,31 +366,28 @@ export default class LocType {
         let ready = true;
         for (let i = 0; i < this.model.length; i++) {
             const model = this.model[i];
-            if (!Model.requestDownload(model & 0xFFFF)) {
+            if (!LocType.models!.requestDownload(model & 0xFFFF, 0)) {
                 ready = false;
             }
         }
         return ready;
     }
 
-    // custom name
-    prefetchModelAll(od: OnDemand) {
-        if (this.model == null) {
-            return;
+    getModel(shape: number, angle: number, heightSW: number, heightSE: number, heightNE: number, heightNW: number, _transformId: number): Model | null {
+        let typecode: bigint;
+        if (this.shape === null) {
+            typecode = (BigInt(this.id) << 10n) + BigInt(angle);
+        } else {
+            typecode = (BigInt(this.id) << 10n) + (BigInt(shape) << 3n) + BigInt(angle);
         }
 
-        for (let i = 0; i < this.model.length; i++) {
-            const model = this.model[i];
-            if (model != -1) {
-                od.prefetch(0, model & 0xFFFF);
-            }
-        }
-    }
-
-    getModel(shape: number, angle: number, heightSW: number, heightSE: number, heightNE: number, heightNW: number, transformId: number): Model | null {
-        let modified = this.buildModel(shape, angle, transformId);
+        let modified = LocType.mc2.find(typecode);
         if (!modified) {
-            return null;
+            modified = this.buildModel(!this.sharelight, false, angle, shape);
+            if (!modified) {
+                return null;
+            }
+            LocType.mc2.put(modified, typecode);
         }
 
         if (this.hillskew || this.sharelight) {
@@ -345,34 +407,70 @@ export default class LocType {
 
                 modified.pointY![i] += y - groundY;
             }
-
-            modified.recalcBoundingCylinder();
         }
 
         return modified;
     }
 
-    buildModel(shape: number, angle: number, transformId: number): Model | null {
+    getAnimatedModel(shape: number, angle: number, frame: number, heightSW: number, heightSE: number, heightNE: number, heightNW: number, seq: SeqType | null): Model | null {
+        let typecode: bigint;
+        if (this.shape === null) {
+            typecode = (BigInt(this.id) << 10n) + BigInt(angle);
+        } else {
+            typecode = (BigInt(this.id) << 10n) + (BigInt(shape) << 3n) + BigInt(angle);
+        }
+
+        let base = LocType.mc3.find(typecode);
+        if (!base) {
+            base = this.buildModel(true, true, angle, shape);
+            if (!base) {
+                return null;
+            }
+            LocType.mc3.put(base, typecode);
+        }
+
+        if (seq === null && !this.hillskew) {
+            return base;
+        }
+
+        let modified: Model;
+        if (seq === null) {
+            modified = Model.copyForAnim(base, true, true, false);
+        } else {
+            modified = seq.animateModel90(frame, base, angle);
+        }
+
+        if (this.hillskew) {
+            const groundY: number = ((heightSW + heightSE + heightNE + heightNW) / 4) | 0;
+
+            for (let i: number = 0; i < modified.numPoints; i++) {
+                const x: number = modified.pointX![i];
+                const z: number = modified.pointZ![i];
+
+                const heightS: number = heightSW + ((((heightSE - heightSW) * (x + 64)) / 128) | 0);
+                const heightN: number = heightNW + ((((heightNE - heightNW) * (x + 64)) / 128) | 0);
+                const y: number = heightS + ((((heightN - heightS) * (z + 64)) / 128) | 0);
+
+                modified.pointY![i] += y - groundY;
+            }
+        }
+
+        return modified;
+    }
+
+    buildModel(doNotShareLight: boolean, prepareAnim: boolean, angle: number, shape: number): Model | null {
         let model: Model | null = null;
-        let typecode: bigint = 0n;
 
         if (this.shape === null) {
             if (shape !== LocShape.CENTREPIECE_STRAIGHT) {
                 return null;
             }
 
-            typecode = ((BigInt(transformId) + 1n) << 32n) + (BigInt(this.id) << 6n) + BigInt(angle);
-
-            const cached = LocType.mc2.find(typecode);
-            if (cached) {
-                return cached;
-            }
-
             if (!this.model) {
                 return null;
             }
 
-            const flip: boolean = this.mirror !== angle > 3;
+            const flip: boolean = angle > 3 !== this.mirror;
             const modelCount: number = this.model.length;
 
             for (let i = 0; i < modelCount; i++) {
@@ -383,7 +481,7 @@ export default class LocType {
 
                 model = LocType.mc1.find(BigInt(modelId));
                 if (!model) {
-                    model = Model.load(modelId & 0xffff);
+                    model = Model.load(LocType.models!, modelId & 0xffff);
                     if (!model) {
                         return null;
                     }
@@ -415,13 +513,6 @@ export default class LocType {
                 return null;
             }
 
-            typecode = ((BigInt(transformId) + 1n) << 32n) + (BigInt(this.id) << 6n) + (BigInt(index) << 3n) + BigInt(angle);
-
-            const cached = LocType.mc2.find(typecode);
-            if (cached) {
-                return cached;
-            }
-
             if (!this.model || index >= this.model.length) {
                 return null;
             }
@@ -438,7 +529,7 @@ export default class LocType {
 
             model = LocType.mc1.find(BigInt(modelId));
             if (!model) {
-                model = Model.load(modelId & 0xffff);
+                model = Model.load(LocType.models!, modelId & 0xffff);
                 if (!model) {
                     return null;
                 }
@@ -458,16 +549,14 @@ export default class LocType {
         const scaled: boolean = this.resizex !== 128 || this.resizey !== 128 || this.resizez !== 128;
         const translated: boolean = this.offsetx !== 0 || this.offsety !== 0 || this.offsetz !== 0;
 
-        const modified: Model = Model.copyForAnim(model, !this.recol_s, AnimFrame.animateTransparencies(transformId), angle === LocAngle.WEST && transformId === -1 && !scaled && !translated);
-        if (transformId !== -1) {
-            modified.prepareAnim();
-            modified.animate(transformId);
-            modified.labelFaces = null;
-            modified.labelVertices = null;
-        }
-
-        while (angle-- > 0) {
+        const modified: Model = Model.copyForAnim(model, !this.recol_s, true, angle === LocAngle.WEST && !scaled && !translated);
+        const rotation: number = angle & 0x3;
+        if (rotation === 1) {
             modified.rotate90();
+        } else if (rotation === 2) {
+            modified.rotate180();
+        } else if (rotation === 3) {
+            modified.rotate270();
         }
 
         if (this.recol_s && this.recol_d) {
@@ -481,16 +570,33 @@ export default class LocType {
         }
 
         if (translated) {
-            modified.translate(this.offsety, this.offsetx, this.offsetz);
+            modified.translate(this.offsetx, this.offsety, this.offsetz);
         }
 
-        modified.calculateNormals((this.ambient & 0xff) + 64, (this.contrast & 0xff) * 5 + 768, -50, -10, -50, !this.sharelight);
-
-        if (this.raiseobject === 1) {
-            modified.objRaise = modified.minY;
+        if (prepareAnim) {
+            modified.prepareAnim();
         }
 
-        LocType.mc2.put(modified, typecode);
+        modified.calculateNormals(this.ambient + 64, 768 + this.contrast * 5, -50, -10, -50, doNotShareLight);
         return modified;
+    }
+
+    getMultiLoc(): LocType | null {
+        if (!this.multiloc) {
+            return null;
+        }
+
+        let index = -1;
+        if (this.multivarbit !== -1) {
+            index = VarCache.getVarbit(this.multivarbit);
+        } else if (this.multivarp !== -1) {
+            index = VarCache.var[this.multivarp];
+        }
+
+        if (index < 0 || index >= this.multiloc.length || this.multiloc[index] === -1) {
+            return null;
+        }
+
+        return LocType.list(this.multiloc[index]);
     }
 }

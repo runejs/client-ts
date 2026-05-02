@@ -32,7 +32,7 @@ export default class CollisionMap {
                 if (x === 0 || z === 0 || x === this.sizeX - 1 || z === this.sizeZ - 1) {
                     this.flags[index] = CollisionFlag._BOUNDS;
                 } else {
-                    this.flags[index] = CollisionFlag._OPEN;
+                    this.flags[index] = CollisionFlag.UNLOADED;
                 }
             }
         }
@@ -43,7 +43,7 @@ export default class CollisionMap {
     }
 
     unblockGround(tileX: number, tileZ: number): void {
-        this.flags[CollisionMap.index(tileX - this.startX, tileZ - this.startZ)] &= ~CollisionFlag.WR_GRND;
+        this.flags[CollisionMap.index(tileX - this.startX, tileZ - this.startZ)] &= CollisionFlag._BOUNDS - CollisionFlag.WR_GRND;
     }
 
     addLoc(tileX: number, tileZ: number, sizeX: number, sizeZ: number, angle: LocAngle, blockrange: boolean): void {
@@ -408,11 +408,11 @@ export default class CollisionMap {
         return false;
     }
 
-    private addCMap(x: number, z: number, flags: number): void {
+    addCMap(x: number, z: number, flags: number): void {
         this.flags[CollisionMap.index(x, z)] |= flags;
     }
 
-    private remCMap(x: number, z: number, flags: number): void {
+    remCMap(x: number, z: number, flags: number): void {
         this.flags[CollisionMap.index(x, z)] &= CollisionFlag._BOUNDS - flags;
     }
 }

@@ -1,11 +1,8 @@
 import Pix2D from '#/graphics/Pix2D.js';
 
-import JagFile from '#/io/JagFile.js';
-import Packet from '#/io/Packet.js';
-
 export default class Pix8 extends Pix2D {
     data: Int8Array;
-    readonly bpal: Int32Array; // base palette
+    bpal: Int32Array; // base palette
     wi: number; // width
     hi: number; // height
     xof: number; // x offset
@@ -13,89 +10,34 @@ export default class Pix8 extends Pix2D {
     owi: number; // original width
     ohi: number; // original height
 
-    constructor(width: number, height: number, palette: Int32Array) {
+    constructor(width: number = 0, height: number = 0, paletteCount: number = 0) {
         super();
 
         this.data = new Int8Array(width * height);
         this.wi = this.owi = width;
         this.hi = this.ohi = height;
         this.xof = this.yof = 0;
-        this.bpal = palette;
+        this.bpal = new Int32Array(paletteCount);
     }
 
-    static depack(jag: JagFile, name: string, sprite: number = 0): Pix8 {
-        const dat: Packet = new Packet(jag.read(name + '.dat'));
-        const index: Packet = new Packet(jag.read('index.dat'));
+    copy(): Pix8 {
+        const image: Pix8 = new Pix8(this.wi, this.hi, this.bpal.length);
+        image.owi = this.owi;
+        image.ohi = this.ohi;
+        image.xof = this.xof;
+        image.yof = this.yof;
 
-        index.pos = dat.g2();
-        const owi: number = index.g2();
-        const ohi: number = index.g2();
-
-        const bpalCount: number = index.g1();
-        const bpal: Int32Array = new Int32Array(bpalCount);
-
-        for (let i: number = 0; i < bpalCount - 1; i++) {
-            bpal[i + 1] = index.g3();
+        const dataLength: number = this.data.length;
+        for (let i: number = 0; i < dataLength; i++) {
+            image.data[i] = this.data[i];
         }
 
-        for (let i: number = 0; i < sprite; i++) {
-            index.pos += 2;
-            dat.pos += index.g2() * index.g2();
-            index.pos += 1;
-        }
-
-        if (dat.pos > dat.length || index.pos > index.length) {
-            throw new Error();
-        }
-
-        const xof: number = index.g1();
-        const yof: number = index.g1();
-        const wi: number = index.g2();
-        const hi: number = index.g2();
-
-        const image: Pix8 = new Pix8(wi, hi, bpal);
-        image.xof = xof;
-        image.yof = yof;
-        image.owi = owi;
-        image.ohi = ohi;
-
-        const encoding: number = index.g1();
-        if (encoding === 0) {
-            for (let i: number = 0; i < image.wi * image.hi; i++) {
-                image.data[i] = dat.g1b();
-            }
-        } else if (encoding === 1) {
-            for (let x: number = 0; x < image.wi; x++) {
-                for (let y: number = 0; y < image.hi; y++) {
-                    image.data[x + y * image.wi] = dat.g1b();
-                }
-            }
+        const paletteLength: number = this.bpal.length;
+        for (let i: number = 0; i < paletteLength; i++) {
+            image.bpal[i] = this.bpal[i];
         }
 
         return image;
-    }
-
-    halveSize(): void {
-        this.owi |= 0;
-        this.ohi |= 0;
-        this.owi /= 2;
-        this.ohi /= 2;
-        this.owi |= 0;
-        this.ohi |= 0;
-
-        const pixels: Int8Array = new Int8Array(this.owi * this.ohi);
-        let off: number = 0;
-        for (let y: number = 0; y < this.hi; y++) {
-            for (let x: number = 0; x < this.wi; x++) {
-                pixels[((x + this.xof) >> 1) + ((y + this.yof) >> 1) * this.owi] = this.data[off++];
-            }
-        }
-
-        this.data = pixels;
-        this.wi = this.owi;
-        this.hi = this.ohi;
-        this.xof = 0;
-        this.yof = 0;
     }
 
     trim(): void {
@@ -149,38 +91,31 @@ export default class Pix8 extends Pix2D {
     }
 
     hflip(): void {
-        const pixels: Int8Array = this.data;
-        const width: number = this.wi;
-        const height: number = this.hi;
+        const pixels: Int8Array = new Int8Array(this.hi * this.wi);
+        let off: number = 0;
 
-        for (let y: number = 0; y < height; y++) {
-            const div: number = (width / 2) | 0;
-            for (let x: number = 0; x < div; x++) {
-                const off1: number = x + y * width;
-                const off2: number = width - x - 1 + y * width;
-
-                const tmp: number = pixels[off1];
-                pixels[off1] = pixels[off2];
-                pixels[off2] = tmp;
+        for (let y: number = 0; y < this.hi; y++) {
+            for (let x: number = this.wi - 1; x >= 0; x--) {
+                pixels[off++] = this.data[this.wi * y + x];
             }
         }
+
+        this.data = pixels;
+        this.xof = this.owi - this.wi - this.xof;
     }
 
     vflip(): void {
-        const pixels: Int8Array = this.data;
-        const width: number = this.wi;
-        const height: number = this.hi;
+        const pixels: Int8Array = new Int8Array(this.hi * this.wi);
+        let off: number = 0;
 
-        for (let y: number = 0; y < ((height / 2) | 0); y++) {
-            for (let x: number = 0; x < width; x++) {
-                const off1: number = x + y * width;
-                const off2: number = x + (height - y - 1) * width;
-
-                const tmp: number = pixels[off1];
-                pixels[off1] = pixels[off2];
-                pixels[off2] = tmp;
+        for (let y: number = this.hi - 1; y >= 0; y--) {
+            for (let x: number = 0; x < this.wi; x++) {
+                pixels[off++] = this.data[this.wi * y + x];
             }
         }
+
+        this.data = pixels;
+        this.yof = this.ohi - this.hi - this.yof;
     }
 
     plotSprite(x: number, y: number): void {
@@ -280,82 +215,4 @@ export default class Pix8 extends Pix2D {
         }
     }
 
-    // mapview applet:
-
-    scalePlotSprite(arg0: number, arg1: number, arg2: number, arg3: number): void {
-        try {
-            const local2: number = this.wi;
-            const local5: number = this.hi;
-            let local7: number = 0;
-            let local9: number = 0;
-            const _local15: number = ((local2 << 16) / arg2) | 0;
-            const _local21: number = ((local5 << 16) / arg3) | 0;
-            const local24: number = this.owi;
-            const local27: number = this.ohi;
-            const local33: number = ((local24 << 16) / arg2) | 0;
-            const local39: number = ((local27 << 16) / arg3) | 0;
-            arg0 = (arg0 + (this.xof * arg2 + local24 - 1) / local24) | 0;
-            arg1 = (arg1 + (this.yof * arg3 + local27 - 1) / local27) | 0;
-            if ((this.xof * arg2) % local24 != 0) {
-                local7 = (((local24 - ((this.xof * arg2) % local24)) << 16) / arg2) | 0;
-            }
-            if ((this.yof * arg3) % local27 != 0) {
-                local9 = (((local27 - ((this.yof * arg3) % local27)) << 16) / arg3) | 0;
-            }
-            arg2 = ((arg2 * (this.wi - (local7 >> 16))) / local24) | 0;
-            arg3 = ((arg3 * (this.hi - (local9 >> 16))) / local27) | 0;
-            let local133: number = arg0 + arg1 * Pix2D.width;
-            let local137: number = Pix2D.width - arg2;
-            let local144: number;
-            if (arg1 < Pix2D.clipMinY) {
-                local144 = Pix2D.clipMinY - arg1;
-                arg3 -= local144;
-                arg1 = 0;
-                local133 += local144 * Pix2D.width;
-                local9 += local39 * local144;
-            }
-            if (arg1 + arg3 > Pix2D.clipMaxY) {
-                arg3 -= arg1 + arg3 - Pix2D.clipMaxY;
-            }
-            if (arg0 < Pix2D.clipMinX) {
-                local144 = Pix2D.clipMinX - arg0;
-                arg2 -= local144;
-                arg0 = 0;
-                local133 += local144;
-                local7 += local33 * local144;
-                local137 += local144;
-            }
-            if (arg0 + arg2 > Pix2D.clipMaxX) {
-                local144 = arg0 + arg2 - Pix2D.clipMaxX;
-                arg2 -= local144;
-                local137 += local144;
-            }
-            this.plotScale(Pix2D.pixels, this.data, this.bpal, local7, local9, local133, local137, arg2, arg3, local33, local39, local2);
-        } catch (_e) {
-            console.log('error in sprite clipping routine');
-        }
-    }
-
-    private plotScale(dst: Int32Array, src: Int8Array, bpal: Int32Array, offW: number, offH: number, dstOff: number, dstStep: number, w: number, h: number, scaleCropWidth: number, scaleCropHeight: number, arg11: number): void {
-        try {
-            const lastOffW: number = offW;
-            for (let y: number = -h; y < 0; y++) {
-                const offY: number = (offH >> 16) * arg11;
-                for (let x: number = -w; x < 0; x++) {
-                    const rgb: number = src[(offW >> 16) + offY];
-                    if (rgb == 0) {
-                        dstOff++;
-                    } else {
-                        dst[dstOff++] = bpal[rgb & 0xff];
-                    }
-                    offW += scaleCropWidth;
-                }
-                offH += scaleCropHeight;
-                offW = lastOffW;
-                dstOff += dstStep;
-            }
-        } catch (_e) {
-            console.log('error in plot_scale');
-        }
-    }
 }

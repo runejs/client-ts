@@ -1,19 +1,19 @@
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
 
 import Model from '#/dash3d/Model.js';
 import PixFont from '#/graphics/PixFont.js';
+import PixLoader from '#/graphics/PixLoader.js';
 
 import LruCache from '#/datastruct/LruCache.js';
-import JString from '#/datastruct/JString.js';
 
 import Pix32 from '#/graphics/Pix32.js';
 
 import { TypedArray1d } from '#/util/Arrays.js';
 import NpcType from '#/config/NpcType.js';
 import ObjType from '#/config/ObjType.js';
-import type ClientPlayer from '#/dash3d/ClientPlayer.js';
-import AnimFrame from '#/dash3d/AnimFrame.js';
+import SeqType from '#/config/SeqType.js';
+import type PlayerModel from '#/dash3d/PlayerModel.js';
+import type Js5 from '#/js5/Js5.js';
 
 export const enum ComponentType {
     TYPE_LAYER = 0,
@@ -24,6 +24,8 @@ export const enum ComponentType {
     TYPE_GRAPHIC = 5,
     TYPE_MODEL = 6,
     TYPE_INV_TEXT = 7,
+    TYPE_TOOLTIP = 8,
+    TYPE_LINE = 9,
 };
 
 export const enum ButtonType {
@@ -36,14 +38,24 @@ export const enum ButtonType {
 };
 
 export default class IfType {
-    static list: IfType[] = [];
-    static modelCache: LruCache<Model> = new LruCache(30);
-    static spriteCache: LruCache<Pix32> | null = null;
+    static list: IfType[][] = [];
+    static open: boolean[] = [];
+    static modelCache: LruCache<Model> = new LruCache(50);
+    static spriteCache: LruCache<Pix32> = new LruCache(200);
+    static fontCache: LruCache<PixFont> = new LruCache(20);
+    static loadingAsset: boolean = false;
+    static interfaces: Js5 | null = null;
+    static sprites: Js5 | null = null;
+    static models: Js5 | null = null;
 
     animFrame: number = 0;
     animCycle: number = 0;
     id: number = -1;
+    parentId: number = -1;
     layerId: number = -1;
+    dataX: number = 0;
+    dataY: number = 0;
+    v3: boolean = false;
     type: number = -1;
     buttonType: number = -1;
     clientCode: number = 0;
@@ -53,11 +65,13 @@ export default class IfType {
     overLayerId: number = -1;
     x: number = 0;
     y: number = 0;
-    scripts: (Uint16Array | null)[] | null = null;
+    scripts: (Int32Array | null)[] | null = null;
     scriptComparator: Uint8Array | null = null;
     scriptOperand: Uint16Array | null = null;
     scrollHeight: number = 0;
     scrollPos: number = 0;
+    scrollPosX: number = 0;
+    field2500: boolean = false;
     hide: boolean = false;
     children: number[] | null = null;
     childX: number[] | null = null;
@@ -72,279 +86,454 @@ export default class IfType {
     marginY: number = 0;
     invBackgroundX: Int16Array | null = null;
     invBackgroundY: Int16Array | null = null;
-    invBackground: (Pix32 | null)[] | null = null;
+    invBackground: Int32Array | null = null;
     iop: (string | null)[] | null = null;
     fill: boolean = false;
     centre: boolean = false;
-    font: PixFont | null = null;
+    hAlign: number = 0;
+    vAlign: number = 0;
+    lineHeight: number = 0;
+    fontId: number = 65535;
     shadow: boolean = false;
-    text: string | null = null;
-    text2: string | null = null;
+    text: string | null = '';
+    text2: string | null = '';
     colour: number = 0;
     colour2: number = 0;
     colourOver: number = 0;
     colour2Over: number = 0;
-    graphic: Pix32 | null = null;
-    graphic2: Pix32 | null = null;
-    model1Type: number = 0;
-    model1Id: number = 0;
-    model2Id: number = 0;
-    model2Type: number = 0;
+    graphic: number = -1;
+    graphic2: number = -1;
+    rotate: number = 0;
+    tiling: boolean = false;
+    model1Type: number = 1;
+    model1Id: number = -1;
+    model2Id: number = -1;
+    model2Type: number = 1;
     modelAnim: number = -1;
     modelAnim2: number = -1;
-    modelZoom: number = 0;
+    modelZoom: number = 100;
     modelXAn: number = 0;
+    modelZAn: number = 0;
     modelYAn: number = 0;
-    targetVerb: string | null = null;
-    targetBase: string | null = null;
-    targetMask: number = -1;
-    buttonText: string | null = null;
+    modelXOf: number = 0;
+    modelYOf: number = 0;
+    modelSpin: number = 0;
+    orthog: boolean = false;
+    invobject: number = -1;
+    invcount: number = 0;
+    field2542: number = 0;
+    draggablebehavior: boolean = false;
+    targetVerb: string | null = '';
+    targetBase: string | null = '';
+    targetMask: number = 0;
+    buttonText: string | null = 'Ok';
+    hashook: boolean = false;
+    opNames: (string | null)[] | null = null;
+    field2544: number = -1;
 
-    static init(interfaces: JagFile, media: JagFile | null, fonts: PixFont[]): void {
-        this.spriteCache = new LruCache(50000);
+    static init(interfaces: Js5, sprites: Js5, models: Js5): void {
+        this.interfaces = interfaces;
+        this.sprites = sprites;
+        this.models = models;
+        this.list = new Array(interfaces.getGroupCount());
+        this.open = new Array(interfaces.getGroupCount()).fill(false);
+    }
 
-        const data: Packet = new Packet(interfaces.read('data'));
-        let layer: number = -1;
+    static openInterface(group: number): boolean {
+        const interfaces = this.interfaces;
+        if (!interfaces) {
+            return false;
+        }
 
-        const count = data.g2();
-        this.list = new Array(count);
+        if (this.open[group]) {
+            return true;
+        }
 
-        while (data.pos < data.length) {
-            let id: number = data.g2();
-            if (id === 65535) {
-                layer = data.g2();
-                id = data.g2();
-            }
+        if (!interfaces.requestGroupDownload(group)) {
+            return false;
+        }
 
-            const com: IfType = (this.list[id] = new IfType());
-            com.id = id;
-            com.layerId = layer;
+        const limit = interfaces.getFileIdLimit(group);
+        if (limit === 0) {
+            this.open[group] = true;
+            return true;
+        }
 
-            com.type = data.g1();
-            com.buttonType = data.g1();
-            com.clientCode = data.g2();
-            com.width = data.g2();
-            com.height = data.g2();
-            com.trans = data.g1();
+        if (!this.list[group]) {
+            this.list[group] = new Array(limit);
+        }
 
-            com.overLayerId = data.g1();
-            if (com.overLayerId === 0) {
-                com.overLayerId = -1;
-            } else {
-                com.overLayerId = ((com.overLayerId - 1) << 8) + data.g1();
-            }
-
-            const scriptStackCount: number = data.g1();
-            if (scriptStackCount > 0) {
-                com.scriptComparator = new Uint8Array(scriptStackCount);
-                com.scriptOperand = new Uint16Array(scriptStackCount);
-
-                for (let i: number = 0; i < scriptStackCount; i++) {
-                    com.scriptComparator[i] = data.g1();
-                    com.scriptOperand[i] = data.g2();
-                }
-            }
-
-            const scriptCount: number = data.g1();
-            if (scriptCount > 0) {
-                com.scripts = new TypedArray1d(scriptCount, null);
-
-                for (let i: number = 0; i < scriptCount; i++) {
-                    const opcodeCount: number = data.g2();
-
-                    const script: Uint16Array = new Uint16Array(opcodeCount);
-                    com.scripts[i] = script;
-                    for (let j: number = 0; j < opcodeCount; j++) {
-                        script[j] = data.g2();
-                    }
-                }
-            }
-
-            if (com.type === ComponentType.TYPE_LAYER) {
-                com.scrollHeight = data.g2();
-                com.hide = data.g1() === 1;
-
-                const childCount: number = data.g2();
-                com.children = new Array(childCount);
-                com.childX = new Array(childCount);
-                com.childY = new Array(childCount);
-
-                for (let i: number = 0; i < childCount; i++) {
-                    com.children[i] = data.g2();
-                    com.childX[i] = data.g2b();
-                    com.childY[i] = data.g2b();
-                }
-            }
-
-            if (com.type === ComponentType.TYPE_UNUSED) {
-                data.pos += 3;
-            }
-
-            if (com.type === ComponentType.TYPE_INV) {
-                com.linkObjType = new Int32Array(com.width * com.height);
-                com.linkObjNumber = new Int32Array(com.width * com.height);
-
-                com.objSwap = data.g1() === 1;
-                com.objOps = data.g1() === 1;
-                com.objUse = data.g1() === 1;
-                com.objReplace = data.g1() === 1;
-
-                com.marginX = data.g1();
-                com.marginY = data.g1();
-
-                com.invBackgroundX = new Int16Array(20);
-                com.invBackgroundY = new Int16Array(20);
-                com.invBackground = new TypedArray1d(20, null);
-
-                for (let i: number = 0; i < 20; i++) {
-                    if (data.g1() === 1) {
-                        com.invBackgroundX[i] = data.g2b();
-                        com.invBackgroundY[i] = data.g2b();
-
-                        const graphic: string = data.gjstr();
-                        if (media && graphic.length > 0) {
-                            const spriteIndex: number = graphic.lastIndexOf(',');
-                            com.invBackground[i] = this.getSprite(media, graphic.substring(0, spriteIndex), parseInt(graphic.substring(spriteIndex + 1)));
-                        }
-                    }
+        for (let file = 0; file < limit; file++) {
+            if (!this.list[group][file]) {
+                const data = interfaces.getFile(file, group);
+                if (!data) {
+                    continue;
                 }
 
-                com.iop = new TypedArray1d(5, null);
-                for (let i: number = 0; i < 5; i++) {
-                    com.iop[i] = data.gjstr();
-                    if (com.iop[i]!.length === 0) {
-                        com.iop[i] = null;
-                    }
-                }
-            }
-
-            if (com.type === ComponentType.TYPE_RECT) {
-                com.fill = data.g1() === 1;
-            }
-
-            if (com.type === ComponentType.TYPE_TEXT || com.type === ComponentType.TYPE_UNUSED) {
-                com.centre = data.g1() === 1;
-
-                const font: number = data.g1();
-                if (fonts) {
-                    com.font = fonts[font];
-                }
-
-                com.shadow = data.g1() === 1;
-            }
-
-            if (com.type === ComponentType.TYPE_TEXT) {
-                com.text = data.gjstr();
-                com.text2 = data.gjstr();
-            }
-
-            if (com.type === ComponentType.TYPE_UNUSED || com.type === ComponentType.TYPE_RECT || com.type === ComponentType.TYPE_TEXT) {
-                com.colour = data.g4();
-            }
-
-            if (com.type === ComponentType.TYPE_RECT || com.type === ComponentType.TYPE_TEXT) {
-                com.colour2 = data.g4();
-                com.colourOver = data.g4();
-                com.colour2Over = data.g4();
-            }
-
-            if (com.type === ComponentType.TYPE_GRAPHIC) {
-                const graphic: string = data.gjstr();
-                if (media && graphic.length > 0) {
-                    const index: number = graphic.lastIndexOf(',');
-                    com.graphic = this.getSprite(media, graphic.substring(0, index), parseInt(graphic.substring(index + 1), 10));
-                }
-
-                const activeGraphic: string = data.gjstr();
-                if (media && activeGraphic.length > 0) {
-                    const index: number = activeGraphic.lastIndexOf(',');
-                    com.graphic2 = this.getSprite(media, activeGraphic.substring(0, index), parseInt(activeGraphic.substring(index + 1), 10));
-                }
-            }
-
-            if (com.type === ComponentType.TYPE_MODEL) {
-                const model: number = data.g1();
-                if (model !== 0) {
-                    com.model1Type = 1;
-                    com.model1Id = ((model - 1) << 8) + data.g1();
-                }
-
-                const activeModel: number = data.g1();
-                if (activeModel !== 0) {
-                    com.model2Type = 1;
-                    com.model2Id = ((activeModel - 1) << 8) + data.g1();
-                }
-
-                com.modelAnim = data.g1();
-                if (com.modelAnim === 0) {
-                    com.modelAnim = -1;
+                this.list[group][file] = new IfType();
+                this.list[group][file].id = (group << 16) + file;
+                this.list[group][file].parentId = this.list[group][file].id;
+                if (data[0] === 0xFF) {
+                    this.list[group][file].decode3(new Packet(data), group);
                 } else {
-                    com.modelAnim = ((com.modelAnim - 1) << 8) + data.g1();
-                }
-
-                com.modelAnim2 = data.g1();
-                if (com.modelAnim2 === 0) {
-                    com.modelAnim2 = -1;
-                } else {
-                    com.modelAnim2 = ((com.modelAnim2 - 1) << 8) + data.g1();
-                }
-
-                com.modelZoom = data.g2();
-                com.modelXAn = data.g2();
-                com.modelYAn = data.g2();
-            }
-
-            if (com.type === ComponentType.TYPE_INV_TEXT) {
-                com.linkObjType = new Int32Array(com.width * com.height);
-                com.linkObjNumber = new Int32Array(com.width * com.height);
-
-                com.centre = data.g1() === 1;
-
-                const font: number = data.g1();
-                if (fonts) {
-                    com.font = fonts[font];
-                }
-
-                com.shadow = data.g1() === 1;
-                com.colour = data.g4();
-                com.marginX = data.g2b();
-                com.marginY = data.g2b();
-
-                com.objOps = data.g1() === 1;
-
-                com.iop = new TypedArray1d(5, null);
-                for (let i: number = 0; i < 5; i++) {
-                    com.iop[i] = data.gjstr();
-                    if (com.iop[i]!.length === 0) {
-                        com.iop[i] = null;
-                    }
-                }
-            }
-
-            if (com.buttonType === ButtonType.BUTTON_TARGET || com.type === ComponentType.TYPE_INV) {
-                com.targetVerb = data.gjstr();
-                com.targetBase = data.gjstr();
-                com.targetMask = data.g2();
-            }
-
-            if (com.buttonType === ButtonType.BUTTON_OK || com.buttonType === ButtonType.BUTTON_TOGGLE || com.buttonType === ButtonType.BUTTON_SELECT || com.buttonType === ButtonType.BUTTON_CONTINUE) {
-                com.buttonText = data.gjstr();
-
-                if (com.buttonText.length === 0) {
-                    if (com.buttonType === ButtonType.BUTTON_OK) {
-                        com.buttonText = 'Ok';
-                    } else if (com.buttonType === ButtonType.BUTTON_TOGGLE) {
-                        com.buttonText = 'Select';
-                    } else if (com.buttonType === ButtonType.BUTTON_SELECT) {
-                        com.buttonText = 'Select';
-                    } else if (com.buttonType === ButtonType.BUTTON_CONTINUE) {
-                        com.buttonText = 'Continue';
-                    }
+                    this.list[group][file].decode(new Packet(data), group);
                 }
             }
         }
 
-        this.spriteCache = null;
+        this.open[group] = true;
+        return true;
+    }
+
+    static async openInterfaceAsync(group: number): Promise<boolean> {
+        const interfaces = this.interfaces;
+        if (!interfaces || group < 0 || group >= this.open.length) {
+            return false;
+        }
+        if (this.open[group]) {
+            return true;
+        }
+        if (!this.openInterface(group)) {
+            if (!(await interfaces.requestGroupDownloadAsync(group))) {
+                return false;
+            }
+        }
+        return this.openInterface(group);
+    }
+
+    static closeInterface(group: number): void {
+        const interfaces = this.interfaces;
+        if (group === -1 || group < 0 || group >= this.open.length || !this.open[group]) {
+            return;
+        }
+
+        interfaces?.discardFiles(group);
+        const components = this.list[group];
+        if (!components) {
+            this.open[group] = false;
+            return;
+        }
+
+        let empty = true;
+        for (let file = 0; file < components.length; file++) {
+            const com = components[file];
+            if (!com) {
+                continue;
+            }
+            if (com.type === ComponentType.TYPE_INV) {
+                empty = false;
+            } else {
+                components[file] = undefined as unknown as IfType;
+            }
+        }
+
+        if (empty) {
+            this.list[group] = undefined as unknown as IfType[];
+        }
+        this.open[group] = false;
+    }
+
+    static get(id: number): IfType | null {
+        const group = id >> 16;
+        const file = id & 0xffff;
+        if (!this.list[group] || !this.list[group][file]) {
+            if (!this.openInterface(group)) {
+                return null;
+            }
+        }
+        return this.list[group][file];
+    }
+
+    static async getAsync(id: number): Promise<IfType | null> {
+        const group = id >> 16;
+        const file = id & 0xffff;
+        if (!this.list[group] || !this.list[group][file]) {
+            if (!(await this.openInterfaceAsync(group))) {
+                return null;
+            }
+        }
+        return this.list[group]?.[file] ?? null;
+    }
+
+    static resetCache(): void {
+        this.spriteCache.clear();
+        this.modelCache.clear();
+        this.fontCache.clear();
+    }
+
+    static getFontIds(): number[] {
+        const ids: number[] = [];
+        const seen = new Set<number>();
+        for (const group of this.list) {
+            if (!group) {
+                continue;
+            }
+            for (const com of group) {
+                if (!com || com.fontId < 0 || com.fontId === 65535 || seen.has(com.fontId)) {
+                    continue;
+                }
+                if (this.sprites && (com.fontId >= this.sprites.getGroupCount() || this.sprites.getFileIdLimit(com.fontId) === 0)) {
+                    continue;
+                }
+                seen.add(com.fontId);
+                ids.push(com.fontId);
+            }
+        }
+        return ids;
+    }
+
+    decode(data: Packet, group: number): void {
+        this.v3 = false;
+        this.type = data.g1();
+        this.buttonType = data.g1();
+        this.clientCode = data.g2();
+        this.dataX = this.x = data.g2b();
+        this.dataY = this.y = data.g2b();
+        this.width = data.g2();
+        this.height = data.g2();
+        this.trans = data.g1();
+        this.layerId = data.g2();
+        if (this.layerId === 65535) {
+            this.layerId = -1;
+        }
+        this.overLayerId = data.g2();
+        if (this.overLayerId === 65535) {
+            this.overLayerId = -1;
+        }
+
+        const scriptStackCount = data.g1();
+        if (scriptStackCount > 0) {
+            this.scriptComparator = new Uint8Array(scriptStackCount);
+            this.scriptOperand = new Uint16Array(scriptStackCount);
+            for (let i = 0; i < scriptStackCount; i++) {
+                this.scriptComparator[i] = data.g1();
+                this.scriptOperand[i] = data.g2();
+            }
+        }
+
+        const scriptCount = data.g1();
+        if (scriptCount > 0) {
+            this.scripts = new TypedArray1d(scriptCount, null);
+            for (let i = 0; i < scriptCount; i++) {
+                const opcodeCount = data.g2();
+                const script = new Int32Array(opcodeCount);
+                this.scripts[i] = script;
+                for (let j = 0; j < opcodeCount; j++) {
+                    const opcode = data.g2();
+                    script[j] = opcode === 65535 ? -1 : opcode;
+                }
+            }
+        }
+
+        if (this.type === ComponentType.TYPE_LAYER) {
+            this.scrollHeight = data.g2();
+            this.hide = data.g1() === 1;
+        }
+        if (this.type === ComponentType.TYPE_UNUSED) {
+            data.g2();
+            data.g1();
+        }
+        if (this.type === ComponentType.TYPE_INV) {
+            this.linkObjType = new Int32Array(this.width * this.height);
+            this.linkObjNumber = new Int32Array(this.width * this.height);
+            this.objSwap = data.g1() === 1;
+            this.objOps = data.g1() === 1;
+            this.objUse = data.g1() === 1;
+            this.objReplace = data.g1() === 1;
+            this.marginX = data.g1();
+            this.marginY = data.g1();
+            this.invBackgroundX = new Int16Array(20);
+            this.invBackgroundY = new Int16Array(20);
+            this.invBackground = new Int32Array(20);
+            this.invBackground.fill(-1);
+            for (let i = 0; i < 20; i++) {
+                if (data.g1() === 1) {
+                    this.invBackgroundX[i] = data.g2b();
+                    this.invBackgroundY[i] = data.g2b();
+                    this.invBackground[i] = data.g4();
+                }
+            }
+            this.iop = new TypedArray1d(5, null);
+            for (let i = 0; i < 5; i++) {
+                this.iop[i] = data.gjstr() || null;
+            }
+        }
+        if (this.type === ComponentType.TYPE_RECT) {
+            this.fill = data.g1() === 1;
+        }
+        if (this.type === ComponentType.TYPE_TEXT || this.type === ComponentType.TYPE_UNUSED) {
+            this.hAlign = data.g1();
+            this.vAlign = data.g1();
+            this.lineHeight = data.g1();
+            this.centre = this.hAlign === 1;
+            this.fontId = data.g2();
+            this.shadow = data.g1() === 1;
+        }
+        if (this.type === ComponentType.TYPE_TEXT) {
+            this.text = data.gjstr();
+            this.text2 = data.gjstr();
+        }
+        if (this.type === ComponentType.TYPE_UNUSED || this.type === ComponentType.TYPE_RECT || this.type === ComponentType.TYPE_TEXT) {
+            this.colour = data.g4();
+        }
+        if (this.type === ComponentType.TYPE_RECT || this.type === ComponentType.TYPE_TEXT) {
+            this.colour2 = data.g4();
+            this.colourOver = data.g4();
+            this.colour2Over = data.g4();
+        }
+        if (this.type === ComponentType.TYPE_GRAPHIC) {
+            this.graphic = data.g4();
+            this.graphic2 = data.g4();
+        }
+        if (this.type === ComponentType.TYPE_MODEL) {
+            this.model1Type = 1;
+            this.model1Id = data.g2();
+            if (this.model1Id === 65535) this.model1Id = -1;
+            this.model2Type = 1;
+            this.model2Id = data.g2();
+            if (this.model2Id === 65535) this.model2Id = -1;
+            this.modelAnim = data.g2();
+            if (this.modelAnim === 65535) this.modelAnim = -1;
+            this.modelAnim2 = data.g2();
+            if (this.modelAnim2 === 65535) this.modelAnim2 = -1;
+            this.modelZoom = data.g2();
+            this.modelXAn = data.g2();
+            this.modelYAn = data.g2();
+        }
+        if (this.type === ComponentType.TYPE_INV_TEXT) {
+            this.linkObjType = new Int32Array(this.width * this.height);
+            this.linkObjNumber = new Int32Array(this.width * this.height);
+            this.hAlign = data.g1();
+            this.centre = this.hAlign === 1;
+            this.fontId = data.g2();
+            this.shadow = data.g1() === 1;
+            this.colour = data.g4();
+            this.marginX = data.g2b();
+            this.marginY = data.g2b();
+            this.objOps = data.g1() === 1;
+            this.iop = new TypedArray1d(5, null);
+            for (let i = 0; i < 5; i++) {
+                this.iop[i] = data.gjstr() || null;
+            }
+        }
+        if (this.type === ComponentType.TYPE_TOOLTIP) {
+            this.text = data.gjstr();
+        }
+        if (this.buttonType === ButtonType.BUTTON_TARGET || this.type === ComponentType.TYPE_INV) {
+            this.targetVerb = data.gjstr();
+            this.targetBase = data.gjstr();
+            this.targetMask = data.g2();
+        }
+        if (this.buttonType === ButtonType.BUTTON_OK || this.buttonType === ButtonType.BUTTON_TOGGLE || this.buttonType === ButtonType.BUTTON_SELECT || this.buttonType === ButtonType.BUTTON_CONTINUE) {
+            this.buttonText = data.gjstr();
+            if (this.buttonText.length === 0) {
+                this.buttonText = this.buttonType === ButtonType.BUTTON_OK ? 'Ok' : this.buttonType === ButtonType.BUTTON_CONTINUE ? 'Continue' : 'Select';
+            }
+        }
+    }
+
+    decode3(data: Packet, group: number): void {
+        data.g1();
+        this.v3 = true;
+        this.type = data.g1();
+        this.clientCode = data.g2();
+        this.dataX = this.x = data.g2b();
+        this.dataY = this.y = data.g2b();
+        this.width = data.g2();
+        this.height = this.type === 9 ? data.g2b() : data.g2();
+        this.layerId = data.g2();
+        if (this.layerId === 65535) {
+            this.layerId = -1;
+        }
+        this.hide = data.g1() === 1;
+        const hasHook = data.g1() === 1;
+        this.hashook = hasHook;
+
+        if (this.type === ComponentType.TYPE_LAYER) {
+            this.scrollPosX = data.g2();
+            this.scrollPos = data.g2();
+        }
+        if (this.type === ComponentType.TYPE_GRAPHIC) {
+            this.graphic = data.g4();
+            this.rotate = data.g2();
+            this.tiling = data.g1() === 1;
+            this.trans = data.g1();
+        }
+        if (this.type === ComponentType.TYPE_MODEL) {
+            this.model1Type = 1;
+            this.model1Id = data.g2();
+            if (this.model1Id === 65535) this.model1Id = -1;
+            this.modelXOf = data.g2b();
+            this.modelYOf = data.g2b();
+            this.modelXAn = data.g2();
+            this.modelYAn = data.g2();
+            this.modelZAn = data.g2();
+            this.modelZoom = data.g2();
+            this.modelAnim = data.g2();
+            if (this.modelAnim === 65535) this.modelAnim = -1;
+            this.orthog = data.g1() === 1;
+        }
+        if (this.type === ComponentType.TYPE_TEXT) {
+            this.fontId = data.g2();
+            this.text = data.gjstr();
+            this.lineHeight = data.g1();
+            this.hAlign = data.g1();
+            this.vAlign = data.g1();
+            this.shadow = data.g1() === 1;
+            this.colour = data.g4();
+        }
+        if (this.type === ComponentType.TYPE_RECT) {
+            this.colour = data.g4();
+            this.fill = data.g1() === 1;
+            this.trans = data.g1();
+        }
+        if (this.type === 9) {
+            data.g1();
+            this.colour = data.g4();
+        }
+
+        if (hasHook) {
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.skipHook(data);
+            this.draggablebehavior = data.g1() === 1;
+            this.field2542 = data.g2();
+            this.field2500 = data.g1() === 1;
+            data.g1();
+            const ops = data.g1();
+            if (ops > 0) {
+                this.opNames = new Array(ops);
+                for (let i = 0; i < ops; i++) {
+                    this.opNames[i] = data.gjstr() || null;
+                }
+            }
+            this.field2544 = data.g2();
+            if (this.field2544 === 65535) {
+                this.field2544 = -1;
+            }
+        }
+    }
+
+    private skipHook(data: Packet): void {
+        const count = data.g1();
+        for (let i = 0; i < count; i++) {
+            if (data.g1() === 0) {
+                data.g4();
+            } else {
+                data.gjstr();
+            }
+        }
     }
 
     swapSlots(src: number, dst: number) {
@@ -361,90 +550,135 @@ export default class IfType {
         this.linkObjNumber[dst] = tmp;
     }
 
-    getTempModel(primaryFrame: number, secondaryFrame: number, active: boolean, localPlayer: ClientPlayer | null): Model | null {
-        let model: Model | null = null;
+    getTempModel(seq: SeqType | null, frame: number, active: boolean, player: PlayerModel | null): Model | null {
+        IfType.loadingAsset = false;
+        let id: number;
+        let type: number;
         if (active) {
-            model = this.getModel(this.model2Type, this.model2Id, localPlayer);
+            id = this.model2Id;
+            type = this.model2Type;
         } else {
-            model = this.getModel(this.model1Type, this.model1Id, localPlayer);
+            type = this.model1Type;
+            id = this.model1Id;
         }
 
-        if (!model) {
+        if (type === 0) {
+            return null;
+        }
+        if (type === 1 && id === -1) {
             return null;
         }
 
-        if (primaryFrame === -1 && secondaryFrame === -1 && !model.faceColour) {
-            return model;
-        }
-
-        const tmp: Model = Model.copyForAnim(model, true, AnimFrame.animateTransparencies(primaryFrame) && AnimFrame.animateTransparencies(secondaryFrame), false);
-        if (primaryFrame !== -1 || secondaryFrame !== -1) {
-            tmp.prepareAnim();
-        }
-
-        if (primaryFrame !== -1) {
-            tmp.animate(primaryFrame);
-        }
-
-        if (secondaryFrame !== -1) {
-            tmp.animate(secondaryFrame);
-        }
-
-        tmp.calculateNormals(64, 768, -50, -10, -50, true);
-        return tmp;
-    }
-
-    private getModel(type: number, id: number, localPlayer: ClientPlayer | null): Model | null {
         let model = IfType.modelCache.find(BigInt((type << 16) + id));
-        if (model) {
-            return model;
-        }
-
-        if (type === 1) {
-            model = Model.load(id);
-        } else if (type === 2) {
-            model = NpcType.list(id).getHead();
-        } else if (type === 3) {
-            if (localPlayer) {
-                model = localPlayer.getHeadModel();
+        if (model === null) {
+            if (type === 1) {
+                model = Model.load(IfType.models!, id);
+                if (model === null) {
+                    IfType.loadingAsset = true;
+                    return null;
+                }
+                model.prepareAnim();
+                model.calculateNormals(64, 768, -50, -10, -50, true);
             }
-        } else if (type === 4) {
-            model = ObjType.list(id).getModelUnlit(50);
-        } else if (type === 5) {
-            model = null;
+            if (type === 2) {
+                model = NpcType.list(id).getHead();
+                if (model === null) {
+                    IfType.loadingAsset = true;
+                    return null;
+                }
+                model.prepareAnim();
+                model.calculateNormals(64, 768, -50, -10, -50, true);
+            }
+            if (type === 3) {
+                if (player === null) {
+                    return null;
+                }
+                model = player.getHeadModel();
+                if (model === null) {
+                    IfType.loadingAsset = true;
+                    return null;
+                }
+                model.prepareAnim();
+                model.calculateNormals(64, 768, -50, -10, -50, true);
+            }
+            if (type === 4) {
+                const obj = ObjType.list(id);
+                model = obj.getModelLit(false, 10);
+                if (model === null) {
+                    IfType.loadingAsset = true;
+                    return null;
+                }
+                model.prepareAnim();
+                model.calculateNormals(obj.ambient + 64, obj.contrast + 768, -50, -10, -50, true);
+            }
+            if (model !== null) {
+                IfType.modelCache.put(model, BigInt((type << 16) + id));
+            }
         }
 
-        if (model) {
-            IfType.modelCache.put(model, BigInt((type << 16) + id));
+        if (model === null) {
+            return null;
+        }
+
+        if (seq !== null) {
+            model = seq.animateModelWithExtra(frame, model);
         }
 
         return model;
     }
 
-    static cacheModel(model: Model, type: number, id: number) {
-        IfType.modelCache.clear();
-
-        if (model && type != 4) {
-            IfType.modelCache.put(model, BigInt((type << 16) + id));
-        }
-    }
-
-    private static getSprite(media: JagFile, name: string, spriteIndex: number): Pix32 | null {
-        const uid: bigint = (JString.hashCode(name) << 8n) | BigInt(spriteIndex);
-
-        if (this.spriteCache) {
-            const image = this.spriteCache.find(uid);
-            if (image) {
-                return image;
-            }
-        }
-
-        try {
-            const image = Pix32.depack(media, name, spriteIndex);
-            this.spriteCache?.put(image, uid);
-            return image;
-        } catch (_e) {
+    getInvBackground(slot: number): Pix32 | null {
+        IfType.loadingAsset = false;
+        if (!this.invBackground || slot < 0 || slot >= this.invBackground.length) {
             return null;
         }
+
+        return IfType.getSprite(this.invBackground[slot]);
+    }
+
+    getGraphic(active: boolean): Pix32 | null {
+        IfType.loadingAsset = false;
+        return IfType.getSprite(active ? this.graphic2 : this.graphic);
+    }
+
+    getFont(): PixFont | null {
+        IfType.loadingAsset = false;
+        if (this.fontId === 65535 || !IfType.sprites) {
+            return null;
+        }
+
+        let font = IfType.fontCache.find(BigInt(this.fontId));
+        if (font) {
+            return font;
+        }
+
+        font = PixLoader.makePixFontFromJs5Id(IfType.sprites, this.fontId, 0);
+        if (font) {
+            IfType.fontCache.put(font, BigInt(this.fontId));
+        } else {
+            IfType.loadingAsset = true;
+        }
+        return font;
+    }
+
+    private static getSprite(id: number): Pix32 | null {
+        this.loadingAsset = false;
+        if (id === -1 || !this.sprites) {
+            return null;
+        }
+
+        const key = BigInt(id);
+        let image = this.spriteCache.find(key);
+        if (image) {
+            return image;
+        }
+
+        image = PixLoader.makePix32FromJs5Id(this.sprites, id, 0);
+        if (image) {
+            this.spriteCache.put(image, key);
+        } else {
+            this.loadingAsset = true;
+        }
+        return image;
     }
 }

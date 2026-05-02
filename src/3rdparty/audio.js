@@ -44,23 +44,76 @@
 
 let waveGain;
 
+function ensureWaveGain() {
+    if (!waveGain) {
+        waveGain = window.audioContext.createGain();
+        waveGain.connect(window.audioContext.destination);
+    }
+    return waveGain;
+}
+
 export async function playWave(data) {
     try {
         const audioBuffer = await window.audioContext.decodeAudioData(new Uint8Array(data).buffer);
         let bufferSource = window.audioContext.createBufferSource();
         bufferSource.buffer = audioBuffer;
-        bufferSource.connect(waveGain);
+        bufferSource.connect(ensureWaveGain());
         bufferSource.start();
     } catch (e) {
         console.error(e);
     }
 }
 
-export function setWaveVolume(dB) {
-    if (!waveGain) {
-        waveGain = window.audioContext.createGain();
-        waveGain.connect(window.audioContext.destination);
-    }
+export async function playWaveStream(data, volume, loop) {
+    const audioBuffer = await window.audioContext.decodeAudioData(new Uint8Array(data).buffer);
+    const source = window.audioContext.createBufferSource();
+    const gain = window.audioContext.createGain();
+    const disconnect = () => {
+        try {
+            source.disconnect();
+        } catch (_e) {
+            // empty
+        }
+        try {
+            gain.disconnect();
+        } catch (_e) {
+            // empty
+        }
+    };
+    const handle = {
+        ended: false,
+        setVolume(value) {
+            gain.gain.value = Math.max(0, value);
+        },
+        stop() {
+            if (!this.ended) {
+                this.ended = true;
+                try {
+                    source.stop();
+                } catch (_e) {
+                    // empty
+                }
+            }
+            disconnect();
+        }
+    };
 
-    waveGain.gain.value = Math.pow(10, dB / 20);
+    source.buffer = audioBuffer;
+    source.loop = loop;
+    handle.setVolume(volume);
+    source.connect(gain);
+    gain.connect(ensureWaveGain());
+    source.onended = () => {
+        if (handle.ended) {
+            return;
+        }
+        handle.ended = true;
+        disconnect();
+    };
+    source.start();
+    return handle;
+}
+
+export function setWaveVolume(dB) {
+    ensureWaveGain().gain.value = Math.pow(10, dB / 20);
 }

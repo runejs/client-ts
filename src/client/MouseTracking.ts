@@ -1,21 +1,19 @@
-import type { Client } from '#/client/Client.js';
+import ClientMouseListener from '#/client/ClientMouseListener.js';
 
 export default class MouseTracking {
-    app: Client;
-    active: boolean = true;
+    active: boolean = false;
     length: number = 0;
     x: number[] = new Array(500);
     y: number[] = new Array(500);
 
-    constructor(app: Client) {
-        this.app = app;
+    constructor() {
     }
 
     cycle() {
         if (this.active) {
             if (this.length < 500) {
-                this.x[this.length] = this.app.mouseX;
-                this.y[this.length] = this.app.mouseY;
+                this.x[this.length] = ClientMouseListener.mouseX;
+                this.y[this.length] = ClientMouseListener.mouseY;
                 this.length++;
             }
         }

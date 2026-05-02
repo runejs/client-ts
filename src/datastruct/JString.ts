@@ -63,7 +63,7 @@ export default class JString {
                 chars[index] = char.toUpperCase();
                 punctuation = false;
             }
-            if (char === '.' || char === '!') {
+            if (char === '.' || char === '!' || char === '?') {
                 punctuation = true;
             }
         }
@@ -76,6 +76,36 @@ export default class JString {
             temp = temp + '*';
         }
         return temp;
+    }
+
+    static toLoginUsername(str: string): string {
+        const chars: string[] = [];
+
+        for (let i = 0; i < str.length && chars.length < 12; i++) {
+            const code = str.charCodeAt(i);
+            if (code >= 0x41 && code <= 0x5a) {
+                chars.push(String.fromCharCode(code + 0x20));
+            } else if ((code >= 0x61 && code <= 0x7a) || (code >= 0x30 && code <= 0x39)) {
+                chars.push(str.charAt(i));
+            } else if (chars.length > 0) {
+                chars.push('_');
+            }
+        }
+
+        let capitalize = true;
+        for (let i = 0; i < chars.length; i++) {
+            if (chars[i] === '_') {
+                chars[i] = ' ';
+                capitalize = true;
+            } else if (capitalize && chars[i] >= 'a' && chars[i] <= 'z') {
+                chars[i] = chars[i].toUpperCase();
+                capitalize = false;
+            } else {
+                capitalize = false;
+            }
+        }
+
+        return chars.join('');
     }
 
     static formatIPv4(ip: number): string {
@@ -114,6 +144,14 @@ export default class JString {
             hash = (hash + (hash >> 56n)) & 0xffffffffffffffn;
         }
 
+        return hash;
+    }
+
+    static hash(str: string): number {
+        let hash: number = 0;
+        for (let i: number = 0; i < str.length; i++) {
+            hash = ((hash << 5) + str.charCodeAt(i) - hash) | 0;
+        }
         return hash;
     }
 }

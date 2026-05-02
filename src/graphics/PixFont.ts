@@ -3,10 +3,14 @@ import Linkable2 from '#/datastruct/Linkable2.js';
 import { Colour } from '#/graphics/Colour.js';
 import Pix2D from '#/graphics/Pix2D.js';
 
-import JagFile from '#/io/JagFile.js';
 import Packet from '#/io/Packet.js';
 
 import JavaRandom from '#/util/JavaRandom.js';
+import { RuneJsCustomCol } from '#/io/ServerProt.js';
+
+interface ArchiveReader {
+    read(name: string): Uint8Array | null;
+}
 
 export default class PixFont extends Linkable2 {
     charMask: Int8Array[] = new Array(256);
@@ -19,8 +23,10 @@ export default class PixFont extends Linkable2 {
     rand: JavaRandom = new JavaRandom(Date.now());
     strikeout: boolean = false;
     height: number = 0;
+    maxAscent: number = 0;
+    maxDescent: number = 0;
 
-    static depack(archive: JagFile, name: string, quill: boolean): PixFont {
+    static depack(archive: ArchiveReader, name: string, quill: boolean): PixFont {
         const dat: Packet = new Packet(archive.read(name + '.dat'));
         const idx: Packet = new Packet(archive.read('index.dat'));
         idx.pos = dat.g2() + 4;
@@ -91,7 +97,47 @@ export default class PixFont extends Linkable2 {
             // ' ' = 'i'
             font.charAdvance[32] = font.charAdvance[105];
         }
+        font.maxAscent = font.height;
+        font.maxDescent = 0;
 
+        return font;
+    }
+
+    static fromPixLoader(yof: Int32Array, wi: Int32Array, hi: Int32Array, bpal: Int32Array, bspr: Int8Array[]): PixFont {
+        const font = new PixFont();
+        let transparent = 0;
+        for (let i = 1; i < bpal.length; i++) {
+            if (bpal[i] === 1) {
+                transparent = i;
+            }
+        }
+
+        let minY = 0x7fffffff;
+        let maxY = -0x80000000;
+        for (let c = 0; c < 256; c++) {
+            font.charOffsetX[c] = 0;
+            font.charOffsetY[c] = yof[c] ?? 0;
+            font.charMaskWidth[c] = wi[c] ?? 0;
+            font.charMaskHeight[c] = hi[c] ?? 0;
+            font.charAdvance[c] = wi[c] ?? 0;
+            if (font.charOffsetY[c] < minY) {
+                minY = font.charOffsetY[c];
+            }
+            if (font.charMaskHeight[c] + font.charOffsetY[c] > maxY) {
+                maxY = font.charMaskHeight[c] + font.charOffsetY[c];
+            }
+
+            const src = bspr[c] ?? new Int8Array(0);
+            const mask = new Int8Array(src.length);
+            for (let i = 0; i < src.length; i++) {
+                mask[i] = (src[i] & 0xff) === transparent ? 0 : 1;
+            }
+            font.charMask[c] = mask;
+        }
+
+        font.height = (font.charMaskHeight[32] ?? 0) + (font.charOffsetY[32] ?? 0);
+        font.maxAscent = font.height - minY;
+        font.maxDescent = maxY - font.height;
         return font;
     }
 
@@ -110,7 +156,7 @@ export default class PixFont extends Linkable2 {
         x |= 0;
         y |= 0;
 
-        this.drawStringTag(str, x - ((this.stringWid(str) / 2) | 0), y, rgb, shadowed);
+        this.drawStringTag(str, x - ((this.stringWidTag(str) / 2) | 0), y, rgb, shadowed);
     }
 
     stringWid(str: string | null): number {
@@ -121,14 +167,145 @@ export default class PixFont extends Linkable2 {
         const length: number = str.length;
         let w: number = 0;
         for (let c: number = 0; c < length; c++) {
+            w += this.charAdvance[str.charCodeAt(c) & 0xff];
+        }
+
+        return w;
+    }
+
+    stringWidTag(str: string | null): number {
+        if (str === null) {
+            return 0;
+        }
+
+        const length: number = str.length;
+        let w: number = 0;
+        for (let c: number = 0; c < length; c++) {
             if (str.charAt(c) === '@' && c + 4 < length && str.charAt(c + 4) === '@') {
                 c += 4;
+            } else if (RuneJsCustomCol && str.charAt(c) === '<') {
+                const end = str.indexOf('>', c + 1);
+                if (end !== -1) {
+                    const tag = str.substring(c + 1, end).toLowerCase();
+                    if (tag === '/col' || tag === 'col' || this.parseColTag(tag) !== -1) {
+                        c = end;
+                        continue;
+                    }
+                }
+                w += this.charAdvance[str.charCodeAt(c) & 0xff];
             } else {
-                w += this.charAdvance[str.charCodeAt(c)];
+                w += this.charAdvance[str.charCodeAt(c) & 0xff];
             }
         }
 
         return w;
+    }
+
+    charWid(code: number): number {
+        return this.charAdvance[code & 0xff];
+    }
+
+    drawStringMultiline(str: string | null, x: number, y: number, width: number, height: number, rgb: number, shadowed: boolean, hAlign: number, vAlign: number, lineHeight: number): void {
+        if (str === null) {
+            return;
+        }
+
+        if (lineHeight === 0) {
+            lineHeight = this.maxAscent || this.height;
+        }
+
+        const wrap = height >= this.maxAscent + this.maxDescent + lineHeight || height >= lineHeight + lineHeight;
+        const lines: string[] = [];
+        let line = '';
+        let lineWidth = 0;
+        let breakIndex = -1;
+        let breakWidth = 0;
+        let activeTag: string | null = null;
+
+        for (let i = 0; i < str.length; i++) {
+            const code = str.charCodeAt(i);
+            if (str.charAt(i) === '@' && i + 4 < str.length && str.charAt(i + 4) === '@') {
+                activeTag = str.substring(i, i + 5);
+                line += activeTag;
+                i += 4;
+            } else if (RuneJsCustomCol && str.charAt(i) === '<') {
+                const end = str.indexOf('>', i + 1);
+                if (end !== -1) {
+                    const tag = str.substring(i + 1, end).toLowerCase();
+                    if (tag === '/col' || tag === 'col' || this.parseColTag(tag) !== -1) {
+                        const fullTag = str.substring(i, end + 1);
+                        activeTag = tag === '/col' || tag === 'col' ? null : fullTag;
+                        line += fullTag;
+                        i = end;
+                        continue;
+                    }
+                }
+                line += str.charAt(i);
+                lineWidth += this.charWid(code);
+            } else if (str.charAt(i) === '\\' && i + 1 < str.length && str.charAt(i + 1) === 'n') {
+                lines.push(line.trim());
+                line = '';
+                lineWidth = 0;
+                breakIndex = -1;
+                activeTag = null;
+                i++;
+            } else {
+                line += str.charAt(i);
+                lineWidth += this.charWid(code);
+                if (code === 32 || code === 45) {
+                    breakIndex = line.length;
+                    breakWidth = lineWidth;
+                }
+                if (wrap && lineWidth > width && breakIndex >= 0) {
+                    lines.push(line.substring(0, breakIndex).trim());
+                    line = line.substring(breakIndex);
+                    lineWidth -= breakWidth;
+                    breakIndex = -1;
+                    if (activeTag !== null && line.length > 4) {
+                        line = activeTag + line;
+                    }
+                }
+            }
+        }
+
+        if (line.length > 0) {
+            lines.push(line.trim());
+        }
+
+        if (vAlign === 3 && lines.length === 1) {
+            vAlign = 1;
+        }
+
+        let drawY: number;
+        if (vAlign === 0) {
+            drawY = y + this.maxAscent;
+        } else if (vAlign === 1) {
+            drawY = y + (((height - this.maxAscent - this.maxDescent - (lines.length - 1) * lineHeight) / 2) | 0) + this.maxAscent;
+        } else if (vAlign === 2) {
+            drawY = y + height - this.maxDescent - (lines.length - 1) * lineHeight;
+        } else {
+            let gap = ((height - this.maxAscent - this.maxDescent - (lines.length - 1) * lineHeight) / (lines.length + 1)) | 0;
+            if (gap < 0) {
+                gap = 0;
+            }
+            drawY = y + this.maxAscent + gap;
+            lineHeight += gap;
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            if (hAlign === 0 || (hAlign === 3 && i === lines.length - 1)) {
+                this.drawStringTag(lines[i], x, drawY, rgb, shadowed);
+            } else if (hAlign === 1) {
+                this.centreStringTag(lines[i], x + ((width / 2) | 0), drawY, rgb, shadowed);
+            } else if (hAlign === 2) {
+                this.drawStringTag(lines[i], x + width - this.stringWidTag(lines[i]), drawY, rgb, shadowed);
+            } else if (i === lines.length - 1) {
+                this.drawStringTag(lines[i], x, drawY, rgb, shadowed);
+            } else {
+                this.method203(lines[i], x, drawY, rgb, shadowed, width);
+            }
+            drawY += lineHeight;
+        }
     }
 
     drawString(str: string | null, x: number, y: number, rgb: number): void {
@@ -174,11 +351,68 @@ export default class PixFont extends Linkable2 {
         }
     }
 
+    centreStringWave2(str: string | null, x: number, y: number, rgb: number, phase: number): void {
+        if (str === null) {
+            return;
+        }
+
+        x |= 0;
+        y |= 0;
+
+        x -= (this.stringWid(str) / 2) | 0;
+        const offY: number = y - this.height;
+
+        for (let i: number = 0; i < str.length; i++) {
+            const c: number = str.charCodeAt(i);
+
+            if (c !== 32) {
+                this.plotLetter(
+                    this.charMask[c],
+                    x + this.charOffsetX[c] + ((Math.sin(phase / 5.0 + i / 5.0) * 5.0) | 0),
+                    offY + this.charOffsetY[c] + ((Math.sin(phase / 5.0 + i / 3.0) * 5.0) | 0),
+                    this.charMaskWidth[c],
+                    this.charMaskHeight[c],
+                    rgb
+                );
+            }
+
+            x += this.charAdvance[c];
+        }
+    }
+
+    centreStringWave3(str: string | null, x: number, y: number, rgb: number, phase: number, delta: number): void {
+        if (str === null) {
+            return;
+        }
+
+        x |= 0;
+        y |= 0;
+
+        let amplitude: number = 7.0 - delta / 8.0;
+        if (amplitude < 0.0) {
+            amplitude = 0.0;
+        }
+
+        x -= (this.stringWid(str) / 2) | 0;
+        const offY: number = y - this.height;
+
+        for (let i: number = 0; i < str.length; i++) {
+            const c: number = str.charCodeAt(i);
+
+            if (c !== 32) {
+                this.plotLetter(this.charMask[c], x + this.charOffsetX[c], offY + this.charOffsetY[c] + ((Math.sin(i / 1.5 + phase) * amplitude) | 0), this.charMaskWidth[c], this.charMaskHeight[c], rgb);
+            }
+
+            x += this.charAdvance[c];
+        }
+    }
+
     drawStringTag(str: string, x: number, y: number, rgb: number, shadowed: boolean): void {
         x |= 0;
         y |= 0;
 
         this.strikeout = false;
+        const baseRgb = rgb;
         const startX = x;
 
         const length: number = str.length;
@@ -190,8 +424,34 @@ export default class PixFont extends Linkable2 {
                     rgb = tag;
                 }
                 i += 4;
+            } else if (RuneJsCustomCol && str.charAt(i) === '<') {
+                const end = str.indexOf('>', i + 1);
+                if (end !== -1) {
+                    const tag = str.substring(i + 1, end).toLowerCase();
+                    const col = this.parseColTag(tag);
+                    if (col !== -1) {
+                        rgb = col;
+                        i = end;
+                        continue;
+                    } else if (tag === '/col' || tag === 'col') {
+                        rgb = baseRgb;
+                        i = end;
+                        continue;
+                    }
+                }
+
+                const c: number = str.charCodeAt(i) & 0xff;
+
+                if (c !== 32) {
+                    if (shadowed) {
+                        this.plotLetter(this.charMask[c], x + this.charOffsetX[c] + 1, y + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colour.BLACK);
+                    }
+                    this.plotLetter(this.charMask[c], x + this.charOffsetX[c], y + this.charOffsetY[c], this.charMaskWidth[c], this.charMaskHeight[c], rgb);
+                }
+
+                x += this.charAdvance[c];
             } else {
-                const c: number = str.charCodeAt(i);
+                const c: number = str.charCodeAt(i) & 0xff;
 
                 if (c !== 32) {
                     if (shadowed) {
@@ -215,6 +475,7 @@ export default class PixFont extends Linkable2 {
 
         this.rand.setSeed(seed);
 
+        const baseRgb = rgb;
         const rand: number = (this.rand.nextInt() & 0x1f) + 192;
         const offY: number = y - this.height;
         for (let i: number = 0; i < str.length; i++) {
@@ -224,8 +485,37 @@ export default class PixFont extends Linkable2 {
                     rgb = tag;
                 }
                 i += 4;
+            } else if (RuneJsCustomCol && str.charAt(i) === '<') {
+                const end = str.indexOf('>', i + 1);
+                if (end !== -1) {
+                    const tag = str.substring(i + 1, end).toLowerCase();
+                    const col = this.parseColTag(tag);
+                    if (col !== -1) {
+                        rgb = col;
+                        i = end;
+                        continue;
+                    } else if (tag === '/col' || tag === 'col') {
+                        rgb = baseRgb;
+                        i = end;
+                        continue;
+                    }
+                }
+
+                const c: number = str.charCodeAt(i) & 0xff;
+                if (c !== 32) {
+                    if (shadowed) {
+                        this.plotLetterTrans(this.charMask[c], x + this.charOffsetX[c] + 1, offY + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colour.BLACK, 192);
+                    }
+
+                    this.plotLetterTrans(this.charMask[c], x + this.charOffsetX[c], offY + this.charOffsetY[c], this.charMaskWidth[c], this.charMaskHeight[c], rgb, rand);
+                }
+
+                x += this.charAdvance[c];
+                if ((this.rand.nextInt() & 0x3) === 0) {
+                    x++;
+                }
             } else {
-                const c: number = str.charCodeAt(i);
+                const c: number = str.charCodeAt(i) & 0xff;
                 if (c !== 32) {
                     if (shadowed) {
                         this.plotLetterTrans(this.charMask[c], x + this.charOffsetX[c] + 1, offY + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colour.BLACK, 192);
@@ -286,14 +576,105 @@ export default class PixFont extends Linkable2 {
         }
     }
 
+    private parseColTag(tag: string): number {
+        if (!tag.startsWith('col=')) {
+            return -1;
+        }
+
+        const hex = tag.substring(4);
+        if (hex.length < 1 || hex.length > 6 || !/^[0-9a-f]+$/.test(hex)) {
+            return -1;
+        }
+
+        return parseInt(hex, 16) & 0xffffff;
+    }
+
     drawStringRight(str: string, x: number, y: number, rgb: number, shadowed: boolean = true): void {
         x |= 0;
         y |= 0;
 
-        if (shadowed) {
-            this.drawString(str, x - this.stringWid(str) + 1, y + 1, Colour.BLACK);
+        this.drawStringTag(str, x - this.stringWidTag(str), y, rgb, shadowed);
+    }
+
+    method203(str: string | null, x: number, y: number, rgb: number, shadowed: boolean, width: number): void {
+        if (str === null) {
+            return;
         }
-        this.drawString(str, x - this.stringWid(str), y, rgb);
+
+        const trimmed = str.trim();
+        let spaces = 0;
+        for (let i = 0; i < trimmed.length; i++) {
+            if (trimmed.charCodeAt(i) === 32) {
+                spaces++;
+            }
+        }
+
+        let extra = 0;
+        if (spaces > 0) {
+            extra = (((width - this.stringWidTag(trimmed)) * 256) / spaces) | 0;
+        }
+
+        this.strikeout = false;
+        const startX = x;
+        let remainder = 0;
+        const baseRgb = rgb;
+        y -= this.height;
+        for (let i = 0; i < trimmed.length; i++) {
+            if (trimmed.charAt(i) === '@' && i + 4 < trimmed.length && trimmed.charAt(i + 4) === '@') {
+                const tag = this.updateState(trimmed.substring(i + 1, i + 4));
+                if (tag !== -1) {
+                    rgb = tag;
+                }
+                i += 4;
+            } else if (RuneJsCustomCol && trimmed.charAt(i) === '<') {
+                const end = trimmed.indexOf('>', i + 1);
+                if (end !== -1) {
+                    const tag = trimmed.substring(i + 1, end).toLowerCase();
+                    const col = this.parseColTag(tag);
+                    if (col !== -1) {
+                        rgb = col;
+                        i = end;
+                        continue;
+                    } else if (tag === '/col' || tag === 'col') {
+                        rgb = baseRgb;
+                        i = end;
+                        continue;
+                    }
+                }
+
+                const c: number = trimmed.charCodeAt(i) & 0xff;
+                if (c !== 32) {
+                    if (shadowed) {
+                        this.plotLetter(this.charMask[c], x + this.charOffsetX[c] + 1, y + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colour.BLACK);
+                    }
+                    this.plotLetter(this.charMask[c], x + this.charOffsetX[c], y + this.charOffsetY[c], this.charMaskWidth[c], this.charMaskHeight[c], rgb);
+                }
+                x += this.charAdvance[c];
+                if (c === 32) {
+                    const advance = extra + remainder;
+                    x += advance >> 8;
+                    remainder = advance & 0xff;
+                }
+            } else {
+                const c: number = trimmed.charCodeAt(i) & 0xff;
+                if (c !== 32) {
+                    if (shadowed) {
+                        this.plotLetter(this.charMask[c], x + this.charOffsetX[c] + 1, y + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colour.BLACK);
+                    }
+                    this.plotLetter(this.charMask[c], x + this.charOffsetX[c], y + this.charOffsetY[c], this.charMaskWidth[c], this.charMaskHeight[c], rgb);
+                }
+                x += this.charAdvance[c];
+                if (c === 32) {
+                    const advance = extra + remainder;
+                    x += advance >> 8;
+                    remainder = advance & 0xff;
+                }
+            }
+        }
+
+        if (this.strikeout) {
+            Pix2D.hline(startX, y + ((this.height * 0.7) | 0), x - startX, Colour.DARKRED);
+        }
     }
 
     plotLetter(data: Int8Array, x: number, y: number, w: number, h: number, rgb: number): void {
@@ -316,8 +697,8 @@ export default class PixFont extends Linkable2 {
             dstOff += cutoff * Pix2D.width;
         }
 
-        if (y + h >= Pix2D.clipMaxY) {
-            h -= y + h + 1 - Pix2D.clipMaxY;
+        if (y + h > Pix2D.clipMaxY) {
+            h -= y + h - Pix2D.clipMaxY;
         }
 
         if (x < Pix2D.clipMinX) {
@@ -330,8 +711,8 @@ export default class PixFont extends Linkable2 {
             dstStep += cutoff;
         }
 
-        if (x + w >= Pix2D.clipMaxX) {
-            const cutoff: number = x + w + 1 - Pix2D.clipMaxX;
+        if (x + w > Pix2D.clipMaxX) {
+            const cutoff: number = x + w - Pix2D.clipMaxX;
             w -= cutoff;
             srcStep += cutoff;
             dstStep += cutoff;
@@ -409,8 +790,8 @@ export default class PixFont extends Linkable2 {
             dstOff += cutoff * Pix2D.width;
         }
 
-        if (y + h >= Pix2D.clipMaxY) {
-            h -= y + h + 1 - Pix2D.clipMaxY;
+        if (y + h > Pix2D.clipMaxY) {
+            h -= y + h - Pix2D.clipMaxY;
         }
 
         if (x < Pix2D.clipMinX) {
@@ -423,8 +804,8 @@ export default class PixFont extends Linkable2 {
             dstStep += cutoff;
         }
 
-        if (x + w >= Pix2D.clipMaxX) {
-            const cutoff: number = x + w + 1 - Pix2D.clipMaxX;
+        if (x + w > Pix2D.clipMaxX) {
+            const cutoff: number = x + w - Pix2D.clipMaxX;
             w -= cutoff;
             srcStep += cutoff;
             dstStep += cutoff;

@@ -6,10 +6,10 @@ import { minify } from 'terser';
 import { nth_identifier } from './identifier.js';
 
 const define = {
-    'process.env.SECURE_ORIGIN': JSON.stringify(process.env.SECURE_ORIGIN ?? 'false'),
-    // original key, used 2003-2010
-    'process.env.LOGIN_RSAE': JSON.stringify(process.env.LOGIN_RSAE ?? '58778699976184461502525193738213253649000149147835990136706041084440742975821'),
-    'process.env.LOGIN_RSAN': JSON.stringify(process.env.LOGIN_RSAN ?? '7162900525229798032761816791230527296329313291232324290237849263501208207972894053929065636522363163621000728841182238772712427862772219676577293600221789'),
+    'process.env.RUNEJS_SERVER_PROT': JSON.stringify(process.env.RUNEJS_SERVER_PROT ?? 'true'),
+    'process.env.RUNEJS_CUSTOM_COL': JSON.stringify(process.env.RUNEJS_CUSTOM_COL ?? 'true'),
+    'process.env.LOGIN_RSAE': JSON.stringify(process.env.LOGIN_RSAE ?? '65537'),
+    'process.env.LOGIN_RSAN': JSON.stringify(process.env.LOGIN_RSAN ?? '119568088839203297999728368933573315070738693395974011872885408638642676871679245723887367232256427712869170521351089799352546294030059890127723509653145359924771433131004387212857375068629466435244653901851504845054452735390701003613803443469723435116497545687393297329052988014281948392136928774011011998343'),
     'process.env.BUILD_TIME': JSON.stringify(new Date().toISOString())
 };
 
@@ -113,7 +113,7 @@ async function applyTerser(script: BunOutput): Promise<boolean> {
                     'Status',
                     'Answer',
 
-                    // main thread <-> ondemand worker protocol
+                    // main thread <-> js5 protocol/debug payloads
                     'type',
                     'versions',
                     'crcs',
@@ -152,9 +152,7 @@ const args = process.argv.slice(2);
 const prod = args[0] !== 'dev';
 
 const entrypoints = [
-    'src/client/Client.ts',
-    'src/mapview/MapView.ts',
-    'src/io/OnDemandWorker.ts'
+    'src/client/Client.ts'
 ];
 
 for (const file of entrypoints) {

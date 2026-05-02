@@ -4,18 +4,17 @@ import SpotType from '#/config/SpotType.js';
 
 import ClientEntity from '#/dash3d/ClientEntity.js';
 
-import AnimFrame from '#/dash3d/AnimFrame.js';
 import Model from '#/dash3d/Model.js';
 
 export const enum NpcUpdate {
-    HITMARK2 = 0x1,
-    ANIM = 0x2,
+    HITMARK2 = 0x2,
+    ANIM = 0x10,
     FACEENTITY = 0x4,
-    SAY = 0x8,
-    HITMARK = 0x10,
-    CHANGETYPE = 0x20,
-    SPOTANIM = 0x40,
-    FACESQUARE = 0x80
+    SAY = 0x40,
+    HITMARK = 0x1,
+    CHANGETYPE = 0x80,
+    SPOTANIM = 0x20,
+    FACESQUARE = 0x8
 }
 
 export default class ClientNpc extends ClientEntity {
@@ -31,28 +30,15 @@ export default class ClientNpc extends ClientEntity {
             return null;
         }
 
+        model.calcBoundingCylinder();
         this.height = model.minY;
 
         if (this.spotanimId != -1 && this.spotanimFrame != -1) {
-            const spot = SpotType.list[this.spotanimId];
-            const spotModel = spot.getTempModel2();
+            const spotModel = SpotType.list(this.spotanimId).getTempModel2(this.spotanimFrame);
 
             if (spotModel != null) {
-                const temp: Model = Model.copyForAnim(spotModel, true, AnimFrame.animateTransparencies(this.spotanimFrame), false);
-                temp.translate(-this.spotanimHeight, 0, 0);
-                temp.prepareAnim();
-                if (spot.seq && spot.seq.frames) {
-                    temp.animate(spot.seq.frames[this.spotanimFrame]);
-                }
-
-                temp.labelFaces = null;
-                temp.labelVertices = null;
-
-                if (spot.resizeh != 128 || spot.resizev != 128) {
-                    temp.resize(spot.resizev, spot.resizeh, spot.resizeh);
-                }
-
-                temp.calculateNormals(spot.ambient + 64, spot.contrast + 850, -30, -50, -30, true);
+                const temp: Model = spotModel;
+                temp.translate(0, -this.spotanimHeight, 0);
 
                 const models: Model[] = [model, temp];
                 model = Model.combine(models, 2);
@@ -71,29 +57,9 @@ export default class ClientNpc extends ClientEntity {
             return null;
         }
 
-        if (this.primaryAnim < 0 || this.primaryAnimDelay != 0) {
-            const secondarySeq = SeqType.list[this.secondaryAnim];
-            let secondaryTransform = -1;
-            if (this.secondaryAnim >= 0 && secondarySeq.frames) {
-                secondaryTransform = secondarySeq.frames[this.secondaryAnimFrame];
-            }
-
-            return this.type.getTempModel(secondaryTransform, -1, null);
-        } else {
-            const primarySeq = SeqType.list[this.primaryAnim];
-            let primaryTransform = -1;
-            if (primarySeq.frames) {
-                primaryTransform = primarySeq.frames[this.primaryAnimFrame];
-            }
-
-            const secondarySeq = SeqType.list[this.secondaryAnim];
-            let secondaryTransform = -1;
-            if (this.secondaryAnim >= 0 && this.secondaryAnim != this.readyanim && secondarySeq.frames) {
-                secondaryTransform = secondarySeq.frames[this.secondaryAnimFrame];
-            }
-
-            return this.type.getTempModel(primaryTransform, secondaryTransform, primarySeq.walkmerge);
-        }
+        const primary: SeqType | null = this.primaryAnim !== -1 && this.primaryAnimDelay === 0 ? SeqType.list(this.primaryAnim) : null;
+        const secondary: SeqType | null = this.secondaryAnim === -1 || (this.readyanim === this.secondaryAnim && primary !== null) ? null : SeqType.list(this.secondaryAnim);
+        return this.type.getTempModel(primary, secondary, this.secondaryAnimFrame, this.primaryAnimFrame);
     }
 
     isReady(): boolean {

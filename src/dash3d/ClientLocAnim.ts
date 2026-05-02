@@ -1,5 +1,6 @@
 import LocType from '#/config/LocType.js';
 import SeqType from '#/config/SeqType.js';
+import { Client } from '#/client/Client.js';
 import type Model from '#/dash3d/Model.js';
 
 import ModelSource from '#/dash3d/ModelSource.js';
@@ -16,7 +17,7 @@ export default class ClientLocAnim extends ModelSource {
     animFrame: number;
     animCycle: number;
 
-    constructor(loopCycle: number, index: number, shape: number, angle: number, heightSW: number, heightSE: number, heightNE: number, heightNW: number, seq: number, randomFrame: boolean) {
+    constructor(index: number, shape: number, angle: number, heightSW: number, heightSE: number, heightNE: number, heightNW: number, seq: number, randomFrame: boolean) {
         super();
 
         this.index = index;
@@ -28,48 +29,51 @@ export default class ClientLocAnim extends ModelSource {
         this.heightNE = heightNE;
         this.heightNW = heightNW;
 
-        this.anim = SeqType.list[seq];
+        this.anim = seq === -1 ? null : SeqType.list(seq);
         this.animFrame = 0;
-        this.animCycle = loopCycle;
+        this.animCycle = Client.loopCycle - 1;
 
-        if (randomFrame && this.anim.loops !== -1) {
-            this.animFrame = (Math.random() * this.anim.numFrames) | 0;
-            this.animCycle -= (Math.random() * this.anim.getDelay(this.animFrame)) | 0;
+        if (randomFrame && this.anim && this.anim.loops !== -1) {
+            this.animFrame = (Math.random() * this.anim.frames!.length) | 0;
+            this.animCycle -= (Math.random() * this.anim.delay![this.animFrame]) | 0;
         }
     }
 
-    override getTempModel(loopCycle: number): Model | null {
+    override getTempModel(): Model | null {
         if (this.anim) {
-            let delta = loopCycle - this.animCycle;
+            let delta = Client.loopCycle - this.animCycle;
             if (delta > 100 && this.anim.loops > 0) {
                 delta = 100;
             }
 
-            while (delta > this.anim.getDelay(this.animFrame)) {
-                delta -= this.anim.getDelay((this.animFrame));
+            while (this.anim.delay![this.animFrame] < delta) {
+                delta -= this.anim.delay![this.animFrame];
                 this.animFrame++;
 
-                if (this.animFrame < this.anim.numFrames) {
+                if (this.anim.frames!.length > this.animFrame) {
                     continue;
                 }
 
                 this.animFrame -= this.anim.loops;
 
-                if (this.animFrame < 0 || this.animFrame >= this.anim.numFrames) {
+                if (this.animFrame < 0 || this.anim.frames!.length <= this.animFrame) {
                     this.anim = null;
                     break;
                 }
             }
 
-            this.animCycle = loopCycle - delta;
+            this.animCycle = Client.loopCycle - delta;
         }
 
-        let frame = -1;
-        if (this.anim && this.anim.frames && typeof this.anim.frames[this.animFrame] !== 'undefined') {
-            frame = this.anim.frames[this.animFrame];
+        let loc: LocType | null = LocType.list(this.index);
+        if (loc.multiloc) {
+            loc = loc.getMultiLoc();
         }
 
-        const loc = LocType.list(this.index);
-        return loc.getModel(this.shape, this.angle, this.heightSW, this.heightSE, this.heightNE, this.heightNW, frame);
+        if (!loc) {
+            return null;
+        }
+
+        return loc.getAnimatedModel(this.shape, this.angle, this.animFrame, this.heightSW, this.heightSE, this.heightNE, this.heightNW, this.anim);
     }
 }

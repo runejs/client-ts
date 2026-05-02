@@ -1,5 +1,5 @@
-import AnimBase, { AnimTransform } from '#/dash3d/AnimBase.js';
-import AnimFrame from '#/dash3d/AnimFrame.js';
+import { AnimTransform } from '#/dash3d/AnimBase.js';
+import SeqType from '#/config/SeqType.js';
 import Pix2D from '#/graphics/Pix2D.js';
 import Pix3D from '#/dash3d/Pix3D.js';
 
@@ -8,42 +8,40 @@ import Packet from '#/io/Packet.js';
 import { Int32Array2d, TypedArray1d } from '#/util/Arrays.js';
 import PointNormal from '#/dash3d/PointNormal.js';
 import ModelSource from '#/dash3d/ModelSource.js';
-import type OnDemandProvider from '#/io/OnDemandProvider.js';
-
-class Metadata {
-    src: Uint8Array | null = null;
-
-    numPoints: number = 0;
-    numFaces: number = 0;
-    numT: number = 0;
-
-    vertexOrderOffset: number = -1;
-    vertexXOffset: number = -1;
-    vertexYOffset: number = -1;
-    vertexZOffset: number = -1;
-    vertexLabelOffset: number = -1;
-
-    faceIndexOffset: number = -1;
-    faceIndexOrderOffset: number = -1;
-    faceColourOffset: number = -1;
-    faceRenderTypeOffset: number = -1;
-    facePriorityOffset: number = 0;
-    faceAlphaOffset: number = -1;
-    faceLabelOffset: number = -1;
-
-    faceTextureAxisOffset: number = -1;
-}
+import type Js5 from '#/js5/Js5.js';
 
 export default class Model extends ModelSource {
     static loaded: number = 0;
-    static meta: (Metadata | null)[] = [];
-    static provider: OnDemandProvider;
 
     // unlit model
 
     static tmpVertexX: Int32Array = new Int32Array(2000);
     static tmpVertexY: Int32Array = new Int32Array(2000);
     static tmpVertexZ: Int32Array = new Int32Array(2000);
+    static textureLightTable: Int32Array = new Int32Array(128);
+
+    static {
+        let i = 0;
+        let value = 248;
+        while (i < 9) {
+            Model.textureLightTable[i++] = 255;
+        }
+        while (i < 16) {
+            Model.textureLightTable[i++] = value;
+            value -= 8;
+        }
+        while (i < 32) {
+            Model.textureLightTable[i++] = value;
+            value -= 4;
+        }
+        while (i < 64) {
+            Model.textureLightTable[i++] = value;
+            value -= 2;
+        }
+        while (i < 128) {
+            Model.textureLightTable[i++] = value--;
+        }
+    }
 
     numPoints: number = 0;
     pointX: Int32Array | null = null;
@@ -77,8 +75,7 @@ export default class Model extends ModelSource {
     maxX: number = 0;
     minZ: number = 0;
     maxZ: number = 0;
-
-    objRaise: number = 0;
+    boundingCalc: number = 0;
 
     // lit model
 
@@ -88,6 +85,7 @@ export default class Model extends ModelSource {
     faceColourA: Int32Array | null = null;
     faceColourB: Int32Array | null = null;
     faceColourC: Int32Array | null = null;
+    field2234: number = 0;
 
     useAABBMouseCheck: boolean = false;
     radius: number = 0;
@@ -127,28 +125,25 @@ export default class Model extends ModelSource {
     static pickedCount: number = 0;
     static pickedEntityTypecode: Int32Array = new Int32Array(1000);
 
-    static init(total: number, provider: OnDemandProvider) {
-        Model.meta = new Array(total);
-        Model.provider = provider;
+    constructor(src?: Uint8Array) {
+        super();
+        if (src) {
+            this.decode(src);
+        }
     }
 
-    static unpack(id: number, src: Uint8Array | null) {
-        if (!src) {
-            const meta = (Model.meta[id] = new Metadata());
-            meta.numPoints = 0;
-            meta.numFaces = 0;
-            meta.numT = 0;
-            return;
-        }
+    static load(models: Js5, id: number): Model | null {
+        const src = models.getFile(0, id);
+        return src ? new Model(src) : null;
+    }
 
+    private decode(src: Uint8Array): void {
         const trailer = new Packet(src);
         trailer.pos = src.length - 18;
 
-        const meta = (Model.meta[id] = new Metadata());
-        meta.src = src;
-        meta.numPoints = trailer.g2();
-        meta.numFaces = trailer.g2();
-        meta.numT = trailer.g1();
+        const numPoints = trailer.g2();
+        const numFaces = trailer.g2();
+        const numT = trailer.g1();
 
         const hasRenderType = trailer.g1();
         const priority = trailer.g1();
@@ -161,140 +156,123 @@ export default class Model extends ModelSource {
         const dataLengthZ = trailer.g2();
         const dataLengthFaceIndex = trailer.g2();
 
-        let pos = 0;
-        meta.vertexOrderOffset = pos;
-        pos += meta.numPoints;
+        const vertexOrderOffset = 0;
+        const faceIndexOrderOffset = numPoints;
+        let pos = numPoints + numFaces;
 
-        meta.faceIndexOrderOffset = pos;
-        pos += meta.numFaces;
-
-        meta.facePriorityOffset = pos;
+        let facePriorityOffset = pos;
         if (priority === 255) {
-            pos += meta.numFaces;
+            pos += numFaces;
         } else {
-            meta.facePriorityOffset = -priority - 1;
+            facePriorityOffset = -priority - 1;
         }
 
-        meta.faceLabelOffset = pos;
+        let faceLabelOffset = pos;
         if (hasFaceLabels === 1) {
-            pos += meta.numFaces;
+            pos += numFaces;
         } else {
-            meta.faceLabelOffset = -1;
+            faceLabelOffset = -1;
         }
 
-        meta.faceRenderTypeOffset = pos;
+        let faceRenderTypeOffset = pos;
         if (hasRenderType === 1) {
-            pos += meta.numFaces;
+            pos += numFaces;
         } else {
-            meta.faceRenderTypeOffset = -1;
+            faceRenderTypeOffset = -1;
         }
 
-        meta.vertexLabelOffset = pos;
+        let vertexLabelOffset = pos;
         if (hasVertexLabels === 1) {
-            pos += meta.numPoints;
+            pos += numPoints;
         } else {
-            meta.vertexLabelOffset = -1;
+            vertexLabelOffset = -1;
         }
 
-        meta.faceAlphaOffset = pos;
+        let faceAlphaOffset = pos;
         if (hasAlpha === 1) {
-            pos += meta.numFaces;
+            pos += numFaces;
         } else {
-            meta.faceAlphaOffset = -1;
+            faceAlphaOffset = -1;
         }
 
-        meta.faceIndexOffset = pos;
+        const faceIndexOffset = pos;
         pos += dataLengthFaceIndex;
 
-        meta.faceColourOffset = pos;
-        pos += meta.numFaces * 2;
+        const faceColourOffset = pos;
+        pos += numFaces * 2;
 
-        meta.faceTextureAxisOffset = pos;
-        pos += meta.numT * 6;
+        const faceTextureAxisOffset = pos;
+        pos += numT * 6;
 
-        meta.vertexXOffset = pos;
+        const vertexXOffset = pos;
         pos += dataLengthX;
 
-        meta.vertexYOffset = pos;
+        const vertexYOffset = pos;
         pos += dataLengthY;
 
-        meta.vertexZOffset = pos;
-        pos += dataLengthZ;
-    }
+        const vertexZOffset = pos;
 
-    static unload(id: number) {
-        Model.meta[id] = null;
-    }
-
-    static load(id: number): Model | null {
-        const meta = Model.meta[id];
-        if (!meta) {
-            Model.provider.requestModel(id);
-            return null;
-        }
-
-        const model = new Model();
         Model.loaded++;
 
-        model.numPoints = meta.numPoints;
-        model.numFaces = meta.numFaces;
-        model.numT = meta.numT;
+        this.numPoints = numPoints;
+        this.numFaces = numFaces;
+        this.numT = numT;
 
-        model.pointX = new Int32Array(model.numPoints);
-        model.pointY = new Int32Array(model.numPoints);
-        model.pointZ = new Int32Array(model.numPoints);
+        this.pointX = new Int32Array(this.numPoints);
+        this.pointY = new Int32Array(this.numPoints);
+        this.pointZ = new Int32Array(this.numPoints);
 
-        model.faceVertexA = new Int32Array(model.numFaces);
-        model.faceVertexB = new Int32Array(model.numFaces);
-        model.faceVertexC = new Int32Array(model.numFaces);
+        this.faceVertexA = new Int32Array(this.numFaces);
+        this.faceVertexB = new Int32Array(this.numFaces);
+        this.faceVertexC = new Int32Array(this.numFaces);
 
-        model.faceTextureP = new Int32Array(model.numT);
-        model.faceTextureM = new Int32Array(model.numT);
-        model.faceTextureN = new Int32Array(model.numT);
+        this.faceTextureP = new Int32Array(this.numT);
+        this.faceTextureM = new Int32Array(this.numT);
+        this.faceTextureN = new Int32Array(this.numT);
 
-        if (meta.vertexLabelOffset >= 0) {
-            model.vertexLabel = new Int32Array(model.numPoints);
+        if (vertexLabelOffset >= 0) {
+            this.vertexLabel = new Int32Array(this.numPoints);
         }
 
-        if (meta.faceRenderTypeOffset >= 0) {
-            model.faceRenderType = new Int32Array(model.numFaces);
+        if (faceRenderTypeOffset >= 0) {
+            this.faceRenderType = new Int32Array(this.numFaces);
         }
 
-        if (meta.facePriorityOffset >= 0) {
-            model.facePriority = new Int32Array(model.numFaces);
+        if (facePriorityOffset >= 0) {
+            this.facePriority = new Int32Array(this.numFaces);
         } else {
-            model.priority = -meta.facePriorityOffset - 1;
+            this.priority = -facePriorityOffset - 1;
         }
 
-        if (meta.faceAlphaOffset >= 0) {
-            model.faceAlpha = new Int32Array(model.numFaces);
+        if (faceAlphaOffset >= 0) {
+            this.faceAlpha = new Int32Array(this.numFaces);
         }
 
-        if (meta.faceLabelOffset >= 0) {
-            model.faceLabel = new Int32Array(model.numFaces);
+        if (faceLabelOffset >= 0) {
+            this.faceLabel = new Int32Array(this.numFaces);
         }
 
-        model.faceColour = new Int32Array(model.numFaces);
+        this.faceColour = new Int32Array(this.numFaces);
 
-        const point1 = new Packet(meta.src);
-        point1.pos = meta.vertexOrderOffset;
+        const point1 = new Packet(src);
+        point1.pos = vertexOrderOffset;
 
-        const point2 = new Packet(meta.src);
-        point2.pos = meta.vertexXOffset;
+        const point2 = new Packet(src);
+        point2.pos = vertexXOffset;
 
-        const point3 = new Packet(meta.src);
-        point3.pos = meta.vertexYOffset;
+        const point3 = new Packet(src);
+        point3.pos = vertexYOffset;
 
-        const point4 = new Packet(meta.src);
-        point4.pos = meta.vertexZOffset;
+        const point4 = new Packet(src);
+        point4.pos = vertexZOffset;
 
-        const point5 = new Packet(meta.src);
-        point5.pos = meta.vertexLabelOffset;
+        const point5 = new Packet(src);
+        point5.pos = vertexLabelOffset;
 
         let dx = 0;
         let dy = 0;
         let dz = 0;
-        for (let v = 0; v < model.numPoints; v++) {
+        for (let v = 0; v < this.numPoints; v++) {
             const order = point1.g1();
 
             let x = 0;
@@ -312,65 +290,65 @@ export default class Model extends ModelSource {
                 z = point4.gsmarts();
             }
 
-            model.pointX[v] = dx + x;
-            model.pointY[v] = dy + y;
-            model.pointZ[v] = dz + z;
+            this.pointX[v] = dx + x;
+            this.pointY[v] = dy + y;
+            this.pointZ[v] = dz + z;
 
-            dx = model.pointX[v];
-            dy = model.pointY[v];
-            dz = model.pointZ[v];
+            dx = this.pointX[v];
+            dy = this.pointY[v];
+            dz = this.pointZ[v];
 
-            if (model.vertexLabel !== null) {
-                model.vertexLabel[v] = point5.g1();
+            if (this.vertexLabel !== null) {
+                this.vertexLabel[v] = point5.g1();
             }
         }
 
-        const face1 = new Packet(meta.src);
-        face1.pos = meta.faceColourOffset;
+        const face1 = new Packet(src);
+        face1.pos = faceColourOffset;
 
-        const face2 = new Packet(meta.src);
-        face2.pos = meta.faceRenderTypeOffset;
+        const face2 = new Packet(src);
+        face2.pos = faceRenderTypeOffset;
 
-        const face3 = new Packet(meta.src);
-        face3.pos = meta.facePriorityOffset;
+        const face3 = new Packet(src);
+        face3.pos = facePriorityOffset;
 
-        const face4 = new Packet(meta.src);
-        face4.pos = meta.faceAlphaOffset;
+        const face4 = new Packet(src);
+        face4.pos = faceAlphaOffset;
 
-        const face5 = new Packet(meta.src);
-        face5.pos = meta.faceLabelOffset;
+        const face5 = new Packet(src);
+        face5.pos = faceLabelOffset;
 
-        for (let f = 0; f < model.numFaces; f++) {
-            model.faceColour[f] = face1.g2();
+        for (let f = 0; f < this.numFaces; f++) {
+            this.faceColour[f] = face1.g2();
 
-            if (model.faceRenderType !== null) {
-                model.faceRenderType[f] = face2.g1();
+            if (this.faceRenderType !== null) {
+                this.faceRenderType[f] = face2.g1();
             }
 
-            if (model.facePriority !== null) {
-                model.facePriority[f] = face3.g1();
+            if (this.facePriority !== null) {
+                this.facePriority[f] = face3.g1();
             }
 
-            if (model.faceAlpha !== null) {
-                model.faceAlpha[f] = face4.g1();
+            if (this.faceAlpha !== null) {
+                this.faceAlpha[f] = face4.g1();
             }
 
-            if (model.faceLabel !== null) {
-                model.faceLabel[f] = face5.g1();
+            if (this.faceLabel !== null) {
+                this.faceLabel[f] = face5.g1();
             }
         }
 
-        const vertex1 = new Packet(meta.src);
-        vertex1.pos = meta.faceIndexOffset;
+        const vertex1 = new Packet(src);
+        vertex1.pos = faceIndexOffset;
 
-        const vertex2 = new Packet(meta.src);
-        vertex2.pos = meta.faceIndexOrderOffset;
+        const vertex2 = new Packet(src);
+        vertex2.pos = faceIndexOrderOffset;
 
         let a = 0;
         let b = 0;
         let c = 0;
         let last = 0;
-        for (let f = 0; f < model.numFaces; f++) {
+        for (let f = 0; f < this.numFaces; f++) {
             const order = vertex2.g1();
 
             if (order === 1) {
@@ -396,31 +374,19 @@ export default class Model extends ModelSource {
                 last = c;
             }
 
-            model.faceVertexA[f] = a;
-            model.faceVertexB[f] = b;
-            model.faceVertexC[f] = c;
+            this.faceVertexA[f] = a;
+            this.faceVertexB[f] = b;
+            this.faceVertexC[f] = c;
         }
 
-        const axis = new Packet(meta.src);
-        axis.pos = meta.faceTextureAxisOffset;
+        const axis = new Packet(src);
+        axis.pos = faceTextureAxisOffset;
 
-        for (let f = 0; f < model.numT; f++) {
-            model.faceTextureP[f] = axis.g2();
-            model.faceTextureM[f] = axis.g2();
-            model.faceTextureN[f] = axis.g2();
+        for (let f = 0; f < this.numT; f++) {
+            this.faceTextureP[f] = axis.g2();
+            this.faceTextureM[f] = axis.g2();
+            this.faceTextureN[f] = axis.g2();
         }
-
-        return model;
-    }
-
-    static requestDownload(id: number): boolean {
-        const meta = Model.meta[id];
-        if (!meta) {
-            Model.provider.requestModel(id);
-            return false;
-        }
-
-        return true;
     }
 
     static combineForAnim(models: (Model | null)[], count: number): Model {
@@ -782,6 +748,8 @@ export default class Model extends ModelSource {
 
         model.vertexLabel = src.vertexLabel;
         model.faceLabel = src.faceLabel;
+        model.labelFaces = src.labelFaces;
+        model.labelVertices = src.labelVertices;
 
         model.faceRenderType = src.faceRenderType;
 
@@ -789,12 +757,18 @@ export default class Model extends ModelSource {
         model.faceVertexB = src.faceVertexB;
         model.faceVertexC = src.faceVertexC;
 
+        model.faceColourA = src.faceColourA;
+        model.faceColourB = src.faceColourB;
+        model.faceColourC = src.faceColourC;
+
         model.facePriority = src.facePriority;
         model.priority = src.priority;
 
         model.faceTextureP = src.faceTextureP;
         model.faceTextureM = src.faceTextureM;
         model.faceTextureN = src.faceTextureN;
+        model.useAABBMouseCheck = src.useAABBMouseCheck;
+        model.boundingCalc = 0;
 
         return model;
     }
@@ -872,16 +846,8 @@ export default class Model extends ModelSource {
         model.faceTextureP = src.faceTextureP;
         model.faceTextureM = src.faceTextureM;
         model.faceTextureN = src.faceTextureN;
-
-        model.minY = src.minY;
-        model.maxY = src.maxY;
-        model.radius = src.radius;
-        model.minDepth = src.minDepth;
-        model.maxDepth = src.maxDepth;
-        model.minX = src.minX;
-        model.maxZ = src.maxZ;
-        model.minZ = src.minZ;
-        model.maxX = src.maxX;
+        model.useAABBMouseCheck = src.useAABBMouseCheck;
+        model.field2234 = src.field2234;
 
         return model;
     }
@@ -978,6 +944,11 @@ export default class Model extends ModelSource {
     }
 
     calcBoundingCylinder(): void {
+        if (this.boundingCalc === 1) {
+            return;
+        }
+
+        this.boundingCalc = 1;
         this.minY = 0;
         this.radius = 0;
         this.maxY = 0;
@@ -1006,7 +977,13 @@ export default class Model extends ModelSource {
         this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0);
     }
 
+    getRadius(): number {
+        this.calcBoundingCylinder();
+        return this.radius;
+    }
+
     recalcBoundingCylinder(): void {
+        this.boundingCalc = 1;
         this.minY = 0;
         this.maxY = 0;
 
@@ -1026,9 +1003,36 @@ export default class Model extends ModelSource {
         this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0);
     }
 
-    private calcBoundingCube(): void {
-        this.minY = 0;
+    private calcAABB(): void {
+        if (this.boundingCalc === 2) {
+            return;
+        }
+
+        this.boundingCalc = 2;
         this.radius = 0;
+
+        for (let v: number = 0; v < this.numPoints; v++) {
+            const x: number = this.pointX![v];
+            const y: number = this.pointY![v];
+            const z: number = this.pointZ![v];
+            const radiusSqr: number = x * x + y * y + z * z;
+            if (radiusSqr > this.radius) {
+                this.radius = radiusSqr;
+            }
+        }
+
+        this.radius = (Math.sqrt(this.radius) + 0.99) | 0;
+        this.minDepth = this.radius;
+        this.maxDepth = this.radius + this.radius;
+    }
+
+    calcBoundingCube(): void {
+        if (this.boundingCalc === 3) {
+            return;
+        }
+
+        this.boundingCalc = 3;
+        this.minY = 0;
         this.maxY = 0;
         this.minX = 999999;
         this.maxX = -999999;
@@ -1063,16 +1067,7 @@ export default class Model extends ModelSource {
             if (y > this.maxY) {
                 this.maxY = y;
             }
-
-            const radiusSqr: number = x * x + z * z;
-            if (radiusSqr > this.radius) {
-                this.radius = radiusSqr;
-            }
         }
-
-        this.radius = Math.sqrt(this.radius) | 0;
-        this.minDepth = Math.sqrt(this.radius * this.radius + this.minY * this.minY) | 0;
-        this.maxDepth = this.minDepth + (Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) | 0);
     }
 
     prepareAnim(): void {
@@ -1145,12 +1140,17 @@ export default class Model extends ModelSource {
             return;
         }
 
-        const transform: AnimFrame = AnimFrame.list[id];
+        const set = SeqType.getFrameSet(id >>> 16);
+        const transform = set?.list[id & 0xffff] ?? null;
         if (!transform) {
             return;
         }
 
-        const base: AnimBase | null = transform.base;
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
+        const base = transform.base;
         Model.oX = 0;
         Model.oY = 0;
         Model.oZ = 0;
@@ -1175,18 +1175,24 @@ export default class Model extends ModelSource {
             return;
         }
 
-        const primary: AnimFrame = AnimFrame.get(primaryId);
+        const primarySet = SeqType.getFrameSet(primaryId >>> 16);
+        const primary = primarySet?.list[primaryId & 0xffff] ?? null;
         if (!primary) {
             return;
         }
 
-        const secondary: AnimFrame = AnimFrame.get(secondaryId);
+        const secondarySet = SeqType.getFrameSet(secondaryId >>> 16);
+        const secondary = secondarySet?.list[secondaryId & 0xffff] ?? null;
         if (!secondary) {
             this.animate(primaryId);
             return;
         }
 
-        const skeleton: AnimBase | null = primary.base;
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
+        const skeleton = primary.base;
 
         Model.oX = 0;
         Model.oY = 0;
@@ -1396,6 +1402,10 @@ export default class Model extends ModelSource {
     }
 
     rotate90(): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
         for (let v: number = 0; v < this.numPoints; v++) {
             const tmp: number = this.pointX![v];
             this.pointX![v] = this.pointZ![v];
@@ -1403,7 +1413,34 @@ export default class Model extends ModelSource {
         }
     }
 
+    rotate180(): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
+        for (let v: number = 0; v < this.numPoints; v++) {
+            this.pointX![v] = -this.pointX![v];
+            this.pointZ![v] = -this.pointZ![v];
+        }
+    }
+
+    rotate270(): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
+        for (let v: number = 0; v < this.numPoints; v++) {
+            const tmp: number = this.pointZ![v];
+            this.pointZ![v] = this.pointX![v];
+            this.pointX![v] = -tmp;
+        }
+    }
+
     rotateXAxis(angle: number): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
         const sin: number = Pix3D.sinTable[angle];
         const cos: number = Pix3D.cosTable[angle];
 
@@ -1414,7 +1451,9 @@ export default class Model extends ModelSource {
         }
     }
 
-    translate(y: number, x: number, z: number): void {
+    translate(x: number, y: number, z: number): void {
+        this.boundingCalc = 0;
+
         for (let v: number = 0; v < this.numPoints; v++) {
             this.pointX![v] += x;
             this.pointY![v] += y;
@@ -1435,6 +1474,10 @@ export default class Model extends ModelSource {
     }
 
     mirror(): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
         for (let v: number = 0; v < this.numPoints; v++) {
             this.pointZ![v] = -this.pointZ![v];
         }
@@ -1447,6 +1490,10 @@ export default class Model extends ModelSource {
     }
 
     resize(x: number, y: number, z: number): void {
+        this.pointNormal = null;
+        this.sharedPointNormal = null;
+        this.boundingCalc = 0;
+
         for (let v: number = 0; v < this.numPoints; v++) {
             this.pointX![v] = ((this.pointX![v] * x) / 128) | 0;
             this.pointY![v] = ((this.pointY![v] * y) / 128) | 0;
@@ -1555,16 +1602,24 @@ export default class Model extends ModelSource {
 
                 this.sharedPointNormal[v] = copy;
             }
+
+            this.field2234 = ((ambient << 16) + (scale & 0xffff)) | 0;
         }
 
         if (doNotShareLight) {
             this.calcBoundingCylinder();
-        } else {
-            this.calcBoundingCube();
         }
     }
 
-    light(ambient: number, contrast: number, x: number, y: number, z: number): void {
+    light(ambient?: number, contrast?: number, x?: number, y?: number, z?: number): void {
+        if (ambient === undefined || contrast === undefined || x === undefined || y === undefined || z === undefined) {
+            ambient = this.field2234 >> 16;
+            contrast = (this.field2234 << 16) >> 16;
+            x = -50;
+            y = -10;
+            z = -50;
+        }
+
         for (let f: number = 0; f < this.numFaces; f++) {
             const a: number = this.faceVertexA![f];
             const b: number = this.faceVertexB![f];
@@ -1633,7 +1688,7 @@ export default class Model extends ModelSource {
                 scalar = 127;
             }
 
-            return 127 - scalar;
+            return Model.textureLightTable[scalar];
         } else {
             // getColour
             scalar = (scalar * (hsl & 0x7f)) >> 7;
@@ -1649,6 +1704,10 @@ export default class Model extends ModelSource {
     }
 
     objRender(pitch: number, yaw: number, roll: number, eyePitch: number, eyeX: number, eyeY: number, eyeZ: number): void {
+        if (this.boundingCalc !== 2 && this.boundingCalc !== 1) {
+            this.calcAABB();
+        }
+
         const sinPitch: number = Pix3D.sinTable[pitch];
         const cosPitch: number = Pix3D.cosTable[pitch];
 
@@ -1714,7 +1773,11 @@ export default class Model extends ModelSource {
         }
     }
 
-    override worldRender(_loopCycle: number, yaw: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
+    override worldRender(yaw: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
+        if (this.boundingCalc !== 1) {
+            this.calcBoundingCylinder();
+        }
+
         const zPrime: number = (relativeZ * cosEyeYaw - relativeX * sinEyeYaw) >> 16;
         const midZ: number = (relativeY * sinEyePitch + zPrime * cosEyePitch) >> 16;
         const radiusCosEyePitch: number = (this.radius * cosEyePitch) >> 16;
@@ -1726,12 +1789,12 @@ export default class Model extends ModelSource {
 
         const midX: number = (relativeZ * sinEyeYaw + relativeX * cosEyeYaw) >> 16;
         let leftX: number = (midX - this.radius) << 9;
-        if (((leftX / maxZ) | 0) >= Pix2D.maxX) {
+        if (((leftX / maxZ) | 0) >= Pix3D.maxX) {
             return;
         }
 
         let rightX: number = (midX + this.radius) << 9;
-        if (((rightX / maxZ) | 0) <= -Pix2D.maxX) {
+        if (((rightX / maxZ) | 0) <= Pix3D.minX) {
             return;
         }
 
@@ -1739,13 +1802,13 @@ export default class Model extends ModelSource {
         const radiusSinEyePitch: number = (this.radius * sinEyePitch) >> 16;
 
         let bottomY: number = (midY + radiusSinEyePitch) << 9;
-        if (((bottomY / maxZ) | 0) <= -Pix2D.maxY) {
+        if (((bottomY / maxZ) | 0) <= Pix3D.minY) {
             return;
         }
 
         const yPrime: number = radiusSinEyePitch + ((this.minY * cosEyePitch) >> 16);
         let topY: number = (midY - yPrime) << 9;
-        if (((topY / maxZ) | 0) >= Pix2D.maxY) {
+        if (((topY / maxZ) | 0) >= Pix3D.maxY) {
             return;
         }
 
@@ -1847,6 +1910,10 @@ export default class Model extends ModelSource {
     }
 
     private render2(clipped: boolean, picking: boolean, typecode: number): void {
+        if (this.maxDepth >= 1600) {
+            return;
+        }
+
         for (let depth: number = 0; depth < this.maxDepth; depth++) {
             Model.tmpDepthFaceCount[depth] = 0;
         }
