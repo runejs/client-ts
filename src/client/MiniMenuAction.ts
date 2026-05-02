@@ -42,6 +42,7 @@ export const enum MiniMenuAction {
     OP_HELD4 = 43,
     OP_HELD5 = 11,
     USEHELD_ONHELD = 56,
+    OP_V3_HELD6 = 1007,
 
     INV_BUTTON1 = 53,
     INV_BUTTON2 = 25,
@@ -55,6 +56,7 @@ export const enum MiniMenuAction {
     IF_BUTTONX = 50,
     TGT_BUTTON = 33,
     CLOSE_BUTTON = 9,
+    CLOSE_TUTORIAL = 40,
     TOGGLE_BUTTON = 23,
     SELECT_BUTTON = 57,
     PAUSE_BUTTON = 54,

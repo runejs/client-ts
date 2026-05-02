@@ -47,6 +47,7 @@ export default class IfType {
     static interfaces: Js5 | null = null;
     static sprites: Js5 | null = null;
     static models: Js5 | null = null;
+    static reportAbuseComId: number = -1;
 
     animFrame: number = 0;
     animCycle: number = 0;
@@ -68,10 +69,12 @@ export default class IfType {
     scripts: (Int32Array | null)[] | null = null;
     scriptComparator: Uint8Array | null = null;
     scriptOperand: Uint16Array | null = null;
-    scrollHeight: number = 0;
     scrollPos: number = 0;
     scrollPosX: number = 0;
+    scrollPosY: number = 0;
     field2500: boolean = false;
+    field2536: boolean = false;
+    field2488: boolean = false;
     hide: boolean = false;
     children: number[] | null = null;
     childX: number[] | null = null;
@@ -93,7 +96,7 @@ export default class IfType {
     hAlign: number = 0;
     vAlign: number = 0;
     lineHeight: number = 0;
-    fontId: number = 65535;
+    font: number = 0;
     shadow: boolean = false;
     text: string | null = '';
     text2: string | null = '';
@@ -122,7 +125,6 @@ export default class IfType {
     invobject: number = -1;
     invcount: number = 0;
     field2542: number = 0;
-    draggablebehavior: boolean = false;
     targetVerb: string | null = '';
     targetBase: string | null = '';
     targetMask: number = 0;
@@ -130,6 +132,19 @@ export default class IfType {
     hashook: boolean = false;
     opNames: (string | null)[] | null = null;
     field2544: number = -1;
+    subcomponents: IfType[] | null = null;
+    field2475: (number | string)[] | null = null;
+    field2478: (number | string)[] | null = null;
+    field2483: (number | string)[] | null = null;
+    field2486: (number | string)[] | null = null;
+    field2487: (number | string)[] | null = null;
+    field2450: (number | string)[] | null = null;
+    field2456: (number | string)[] | null = null;
+    field2464: (number | string)[] | null = null;
+    field2501: (number | string)[] | null = null;
+    field2513: (number | string)[] | null = null;
+    field2518: (number | string)[] | null = null;
+    field2553: (number | string)[] | null = null;
 
     static init(interfaces: Js5, sprites: Js5, models: Js5): void {
         this.interfaces = interfaces;
@@ -172,7 +187,7 @@ export default class IfType {
 
                 this.list[group][file] = new IfType();
                 this.list[group][file].id = (group << 16) + file;
-                this.list[group][file].parentId = this.list[group][file].id;
+                this.list[group][file].parentId = (group << 16) + file;
                 if (data[0] === 0xFF) {
                     this.list[group][file].decode3(new Packet(data), group);
                 } else {
@@ -261,25 +276,22 @@ export default class IfType {
         this.fontCache.clear();
     }
 
-    static getFontIds(): number[] {
-        const ids: number[] = [];
-        const seen = new Set<number>();
-        for (const group of this.list) {
-            if (!group) {
-                continue;
-            }
-            for (const com of group) {
-                if (!com || com.fontId < 0 || com.fontId === 65535 || seen.has(com.fontId)) {
-                    continue;
-                }
-                if (this.sprites && (com.fontId >= this.sprites.getGroupCount() || this.sprites.getFileIdLimit(com.fontId) === 0)) {
-                    continue;
-                }
-                seen.add(com.fontId);
-                ids.push(com.fontId);
+    static decodeHook(data: Packet): (number | string)[] | null {
+        const count = data.g1();
+        if (count === 0) {
+            return null;
+        }
+
+        const hook: (number | string)[] = new Array(count);
+        for (let i = 0; i < count; i++) {
+            const type = data.g1();
+            if (type === 0) {
+                hook[i] = data.g4();
+            } else if (type === 1) {
+                hook[i] = data.gjstr();
             }
         }
-        return ids;
+        return hook;
     }
 
     decode(data: Packet, group: number): void {
@@ -326,7 +338,7 @@ export default class IfType {
         }
 
         if (this.type === ComponentType.TYPE_LAYER) {
-            this.scrollHeight = data.g2();
+            this.scrollPos = data.g2();
             this.hide = data.g1() === 1;
         }
         if (this.type === ComponentType.TYPE_UNUSED) {
@@ -366,7 +378,7 @@ export default class IfType {
             this.vAlign = data.g1();
             this.lineHeight = data.g1();
             this.centre = this.hAlign === 1;
-            this.fontId = data.g2();
+            this.font = data.g2();
             this.shadow = data.g1() === 1;
         }
         if (this.type === ComponentType.TYPE_TEXT) {
@@ -405,7 +417,7 @@ export default class IfType {
             this.linkObjNumber = new Int32Array(this.width * this.height);
             this.hAlign = data.g1();
             this.centre = this.hAlign === 1;
-            this.fontId = data.g2();
+            this.font = data.g2();
             this.shadow = data.g1() === 1;
             this.colour = data.g4();
             this.marginX = data.g2b();
@@ -451,7 +463,7 @@ export default class IfType {
 
         if (this.type === ComponentType.TYPE_LAYER) {
             this.scrollPosX = data.g2();
-            this.scrollPos = data.g2();
+            this.scrollPosY = data.g2();
         }
         if (this.type === ComponentType.TYPE_GRAPHIC) {
             this.graphic = data.g4();
@@ -474,7 +486,7 @@ export default class IfType {
             this.orthog = data.g1() === 1;
         }
         if (this.type === ComponentType.TYPE_TEXT) {
-            this.fontId = data.g2();
+            this.font = data.g2();
             this.text = data.gjstr();
             this.lineHeight = data.g1();
             this.hAlign = data.g1();
@@ -493,21 +505,21 @@ export default class IfType {
         }
 
         if (hasHook) {
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.skipHook(data);
-            this.draggablebehavior = data.g1() === 1;
+            this.field2483 = IfType.decodeHook(data);
+            this.field2487 = IfType.decodeHook(data);
+            this.field2450 = IfType.decodeHook(data);
+            this.field2513 = IfType.decodeHook(data);
+            this.field2464 = IfType.decodeHook(data);
+            this.field2478 = IfType.decodeHook(data);
+            this.field2475 = IfType.decodeHook(data);
+            IfType.decodeHook(data);
+            this.field2456 = IfType.decodeHook(data);
+            this.field2518 = IfType.decodeHook(data);
+            IfType.decodeHook(data);
+            this.field2501 = IfType.decodeHook(data);
+            this.field2553 = IfType.decodeHook(data);
+            this.field2486 = IfType.decodeHook(data);
+            this.objOps = data.g1() === 1;
             this.field2542 = data.g2();
             this.field2500 = data.g1() === 1;
             data.g1();
@@ -515,23 +527,12 @@ export default class IfType {
             if (ops > 0) {
                 this.opNames = new Array(ops);
                 for (let i = 0; i < ops; i++) {
-                    this.opNames[i] = data.gjstr() || null;
+                    this.opNames[i] = data.gjstr();
                 }
             }
             this.field2544 = data.g2();
             if (this.field2544 === 65535) {
                 this.field2544 = -1;
-            }
-        }
-    }
-
-    private skipHook(data: Packet): void {
-        const count = data.g1();
-        for (let i = 0; i < count; i++) {
-            if (data.g1() === 0) {
-                data.g4();
-            } else {
-                data.gjstr();
             }
         }
     }
@@ -643,18 +644,18 @@ export default class IfType {
 
     getFont(): PixFont | null {
         IfType.loadingAsset = false;
-        if (this.fontId === 65535 || !IfType.sprites) {
+        if (this.font === 65535 || !IfType.sprites) {
             return null;
         }
 
-        let font = IfType.fontCache.find(BigInt(this.fontId));
+        let font = IfType.fontCache.find(BigInt(this.font));
         if (font) {
             return font;
         }
 
-        font = PixLoader.makePixFontFromJs5Id(IfType.sprites, this.fontId, 0);
+        font = PixLoader.makePixFontFromJs5Id(IfType.sprites, this.font, 0);
         if (font) {
-            IfType.fontCache.put(font, BigInt(this.fontId));
+            IfType.fontCache.put(font, BigInt(this.font));
         } else {
             IfType.loadingAsset = true;
         }

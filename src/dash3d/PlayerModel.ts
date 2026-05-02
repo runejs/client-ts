@@ -133,24 +133,15 @@ export default class PlayerModel {
             return model;
         }
 
-        let primaryTransform = -1;
-        let secondaryTransform = -1;
-        if (primary?.frames) {
-            primaryTransform = primary.frames[primaryFrame];
-        }
-        if (secondary?.frames) {
-            secondaryTransform = secondary.frames[secondaryFrame];
+        if (primary !== null && secondary !== null) {
+            return primary.splitAnimateModel(model, secondary, primaryFrame, secondaryFrame);
+        } else if (primary !== null) {
+            return primary.animateModel(primaryFrame, model);
+        } else if (secondary !== null) {
+            return secondary.animateModel(secondaryFrame, model);
         }
 
-        const animated: Model = Model.copyForAnim(model, true, SeqType.isFrameOpaque(primaryTransform) && SeqType.isFrameOpaque(secondaryTransform), false);
-        if (primaryTransform !== -1 && secondaryTransform !== -1) {
-            animated.maskAnimate(primaryTransform, secondaryTransform, primary?.walkmerge ?? null);
-        } else if (primaryTransform !== -1) {
-            animated.animate(primaryTransform);
-        } else if (secondaryTransform !== -1) {
-            animated.animate(secondaryTransform);
-        }
-        return animated;
+        return model;
     }
 
     calcBaseId(): void {
@@ -180,7 +171,7 @@ export default class PlayerModel {
         this.baseId += this.gender ? 1n : 0n;
         this.appearance[5] = part5;
         this.appearance[9] = part9;
-        if (oldBaseId !== 0n && this.baseId !== oldBaseId) {
+        if (oldBaseId !== 0n && this.baseId !== oldBaseId && oldBaseId !== this.headModelHashToModelCacheID) {
             PlayerModel.modelCache.remove(oldBaseId);
         }
     }

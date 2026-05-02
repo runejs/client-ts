@@ -413,6 +413,9 @@ export class Client extends GameShell {
     private hoveredSlot: number = 0;
     private objGrabThreshold: boolean = false;
     private objDragCycles: number = 0;
+    private field548: IfType | null = null;
+    private field2392: number = 0;
+    private field419: number = 0;
 
     private inMultizone: number = 0;
     private chatDisabled: number = 0;
@@ -2649,9 +2652,12 @@ export class Client extends GameShell {
 
         if (checkClickInput) {
             this.mouseLoop();
-            this.minimapLoop();
-            this.iconLoop();
-            this.chatModeLoop();
+
+            if (this.fullModalId1 === -1) {
+                this.minimapLoop();
+                this.iconLoop();
+                this.chatModeLoop();
+            }
         }
 
         if (ClientMouseListener.mouseButton === 1 || ClientMouseListener.mouseClickButton === 1) {
@@ -4124,8 +4130,8 @@ export class Client extends GameShell {
                 e.secondaryAnimCycle++;
 
                 if (e.secondaryAnimFrame < seq.numFrames && e.secondaryAnimCycle > seq.getDelay(e.secondaryAnimFrame)) {
-                    e.secondaryAnimCycle = 0;
                     e.secondaryAnimFrame++;
+                    e.secondaryAnimCycle = 1;
                 }
 
                 if (e.secondaryAnimFrame >= seq.numFrames) {
@@ -4164,7 +4170,7 @@ export class Client extends GameShell {
 
         if (e.primaryAnim != -1 && e.primaryAnimDelay <= 1) {
             seq = SeqType.list(e.primaryAnim);
-            if (seq.postanim_move === PostanimMove.ABORTANIM && e.preanimRouteLength > 0 && this.loopCycle >= e.exactMoveStart && this.loopCycle > e.exactMoveEnd) {
+            if (seq.postanim_move === PostanimMove.ABORTANIM && e.preanimRouteLength > 0 && e.exactMoveEnd <= this.loopCycle && e.exactMoveStart < this.loopCycle) {
                 e.primaryAnimDelay = 1;
                 return;
             }
@@ -4177,9 +4183,9 @@ export class Client extends GameShell {
             } else {
                 e.primaryAnimCycle++;
 
-                while (e.primaryAnimFrame < seq.numFrames && e.primaryAnimCycle > seq.getDelay(e.primaryAnimFrame)) {
-                    e.primaryAnimCycle -= seq.getDelay(e.primaryAnimFrame);
+                if (e.primaryAnimFrame < seq.numFrames && e.primaryAnimCycle > seq.getDelay(e.primaryAnimFrame)) {
                     e.primaryAnimFrame++;
+                    e.primaryAnimCycle = 1;
                 }
 
                 if (e.primaryAnimFrame >= seq.numFrames) {
@@ -4323,13 +4329,13 @@ export class Client extends GameShell {
         }
 
         if (this.chatModalId === -1) {
-            this.chatInterface.scrollPos = this.chatScrollHeight - this.chatScrollPos - 77;
+            this.chatInterface.scrollPosY = this.chatScrollHeight - this.chatScrollPos - 77;
 
             if (ClientMouseListener.mouseX > 448 && ClientMouseListener.mouseX < 560 && ClientMouseListener.mouseY > 332) {
                 this.doScrollbar(ClientMouseListener.mouseX - 17, ClientMouseListener.mouseY - 357, this.chatScrollHeight, 77, false, 463, 0, this.chatInterface);
             }
 
-            let offset: number = this.chatScrollHeight - this.chatInterface.scrollPos - 77;
+            let offset: number = this.chatScrollHeight - this.chatInterface.scrollPosY - 77;
             if (offset < 0) {
                 offset = 0;
             }
@@ -6742,7 +6748,12 @@ export class Client extends GameShell {
                 if (objId === 65535) {
                     objId = -1;
                 }
-                if (objId === -1) {
+                if (com.v3) {
+                    com.invcount = 1;
+                    com.invobject = objId;
+                    this.ptype = -1;
+                    return true;
+                } else if (objId === -1) {
                     com.model1Type = 0;
                     this.ptype = -1;
                     return true;
@@ -6885,11 +6896,11 @@ export class Client extends GameShell {
                         pos = 0;
                     }
 
-                    if (pos > com.scrollHeight - com.height) {
-                        pos = com.scrollHeight - com.height;
+                    if (pos > com.scrollPos - com.height) {
+                        pos = com.scrollPos - com.height;
                     }
 
-                    com.scrollPos = pos;
+                    com.scrollPosY = pos;
                 }
 
                 this.ptype = -1;
@@ -6928,14 +6939,31 @@ export class Client extends GameShell {
                 const comId = RuneJsServerProt ? this.in.g4() : this.in.g4_alt3();
 
                 const inv: IfType | null = await IfType.getAsync(comId);
-                if (!inv || !inv.linkObjType || !inv.linkObjNumber) {
+                if (!inv) {
                     throw new Error();
                 }
 
-                for (let i: number = 0; i < inv.linkObjType.length; i++) {
-                    // [sic] redundant assignment
-                    inv.linkObjType[i] = -1;
-                    inv.linkObjType[i] = 0;
+                if (inv.v3) {
+                    const components: IfType[] | undefined = IfType.list[comId >> 16];
+                    if (components) {
+                        for (let i: number = 0; i < components.length; i++) {
+                            const com: IfType | null | undefined = components[i];
+                            if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && com.field2542 > 0) {
+                                com.invobject = -1;
+                                com.invcount = 0;
+                            }
+                        }
+                    }
+                } else {
+                    if (!inv.linkObjType || !inv.linkObjNumber) {
+                        throw new Error();
+                    }
+
+                    for (let i: number = 0; i < inv.linkObjType.length; i++) {
+                        // [sic] redundant assignment
+                        inv.linkObjType[i] = -1;
+                        inv.linkObjType[i] = 0;
+                    }
                 }
 
                 this.ptype = -1;
@@ -6947,19 +6975,36 @@ export class Client extends GameShell {
                 const comId: number = this.in.g4();
 
                 const inv: IfType | null = await IfType.getAsync(comId);
-                if (!inv || !inv.linkObjType || !inv.linkObjNumber) {
+                if (!inv) {
                     throw new Error();
                 }
 
                 if (RuneJsServerProt) {
+                    if (inv.v3) {
+                        const components: IfType[] | undefined = IfType.list[comId >> 16];
+                        if (components) {
+                            for (let i: number = 0; i < components.length; i++) {
+                                const com: IfType | null | undefined = components[i];
+                                if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && com.field2542 > 0) {
+                                    com.invcount = 0;
+                                    com.invobject = -1;
+                                }
+                            }
+                        }
+                    } else if (!inv.linkObjType || !inv.linkObjNumber) {
+                        throw new Error();
+                    }
+
                     const size: number = this.in.g2();
                     for (let i: number = 0; i < size; i += 8) {
                         const bitset = this.in.g1();
                         for (let offset = 0; offset < 8 && i + offset < size; offset++) {
                             const slot = i + offset;
                             if ((bitset & (1 << offset)) === 0) {
-                                inv.linkObjType[slot] = 0;
-                                inv.linkObjNumber[slot] = 0;
+                                if (!inv.v3) {
+                                    inv.linkObjType![slot] = 0;
+                                    inv.linkObjNumber![slot] = 0;
+                                }
                                 continue;
                             }
 
@@ -6968,19 +7013,52 @@ export class Client extends GameShell {
                                 count = this.in.g4();
                             }
 
-                            inv.linkObjNumber[slot] = count;
-                            inv.linkObjType[slot] = this.in.g2();
+                            const id: number = this.in.g2();
+                            if (inv.v3) {
+                                const components: IfType[] | undefined = IfType.list[comId >> 16];
+                                if (components) {
+                                    for (let j: number = 0; j < components.length; j++) {
+                                        const com: IfType | null | undefined = components[j];
+                                        if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && slot + 1 === com.field2542) {
+                                            com.invcount = count;
+                                            com.invobject = id - 1;
+                                        }
+                                    }
+                                }
+                            } else {
+                                inv.linkObjNumber![slot] = count;
+                                inv.linkObjType![slot] = id;
+                            }
                         }
                     }
 
-                    for (let i: number = size; i < inv.linkObjType.length; i++) {
-                        inv.linkObjType[i] = 0;
-                        inv.linkObjNumber[i] = 0;
+                    if (!inv.v3) {
+                        for (let i: number = size; i < inv.linkObjType!.length; i++) {
+                            inv.linkObjType![i] = 0;
+                            inv.linkObjNumber![i] = 0;
+                        }
                     }
                 } else {
-                    for (let i: number = 0; i < inv.linkObjType.length; i++) {
-                        inv.linkObjType[i] = 0;
-                        inv.linkObjNumber[i] = 0;
+                    if (inv.v3) {
+                        const components: IfType[] | undefined = IfType.list[comId >> 16];
+                        if (components) {
+                            for (let i: number = 0; i < components.length; i++) {
+                                const com: IfType | null | undefined = components[i];
+                                if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && com.field2542 > 0) {
+                                    com.invcount = 0;
+                                    com.invobject = -1;
+                                }
+                            }
+                        }
+                    } else {
+                        if (!inv.linkObjType || !inv.linkObjNumber) {
+                            throw new Error();
+                        }
+
+                        for (let i: number = 0; i < inv.linkObjType.length; i++) {
+                            inv.linkObjType[i] = 0;
+                            inv.linkObjNumber[i] = 0;
+                        }
                     }
 
                     const size: number = this.in.g2();
@@ -6991,8 +7069,21 @@ export class Client extends GameShell {
                         }
 
                         const id = this.in.g2_alt2();
-                        inv.linkObjType[i] = id;
-                        inv.linkObjNumber[i] = count;
+                        if (inv.v3) {
+                            const components: IfType[] | undefined = IfType.list[comId >> 16];
+                            if (components) {
+                                for (let slot: number = 0; slot < components.length; slot++) {
+                                    const com: IfType | null | undefined = components[slot];
+                                    if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && i + 1 === com.field2542) {
+                                        com.invcount = count;
+                                        com.invobject = id - 1;
+                                    }
+                                }
+                            }
+                        } else {
+                            inv.linkObjType![i] = id;
+                            inv.linkObjNumber![i] = count;
+                        }
                     }
                 }
 
@@ -7006,7 +7097,7 @@ export class Client extends GameShell {
                 const comId: number = this.in.g4();
 
                 const inv: IfType | null = await IfType.getAsync(comId);
-                if (!inv || !inv.linkObjType || !inv.linkObjNumber) {
+                if (!inv) {
                     throw new Error();
                 }
 
@@ -7022,9 +7113,26 @@ export class Client extends GameShell {
                         }
                     }
 
-                    if (slot >= 0 && slot < inv.linkObjType.length) {
-                        inv.linkObjType[slot] = id;
-                        inv.linkObjNumber[slot] = count;
+                    if (inv.v3) {
+                        const components: IfType[] | undefined = IfType.list[comId >> 16];
+                        if (components) {
+                            for (let i: number = 0; i < components.length; i++) {
+                                const com: IfType | null | undefined = components[i];
+                                if (com && (inv.parentId & 0xffff) === (com.layerId & 0xffff) && slot + 1 === com.field2542) {
+                                    com.invcount = count;
+                                    com.invobject = id - 1;
+                                }
+                            }
+                        }
+                    } else {
+                        if (!inv.linkObjType || !inv.linkObjNumber) {
+                            throw new Error();
+                        }
+
+                        if (slot >= 0 && slot < inv.linkObjType.length) {
+                            inv.linkObjType[slot] = id;
+                            inv.linkObjNumber[slot] = count;
+                        }
                     }
                 }
 
@@ -8552,54 +8660,32 @@ export class Client extends GameShell {
 
     private getPlayerPosDecodeExtended(player: ClientPlayer, index: number, mask: number, buf: Packet): void {
         if ((mask & PlayerUpdate.HITMARK) !== 0) {
-            const damage = buf.g1();
-            const damageType = buf.g1();
+            const damage = buf.g1_alt3();
+            const damageType = buf.g1_alt1();
 
             player.addHitmark(damageType, this.loopCycle, damage);
-            player.combatCycle = this.loopCycle + 400;
-            player.health = buf.g1();
-            player.totalHealth = buf.g1();
+            player.combatCycle = this.loopCycle + 300;
+            player.health = buf.g1_alt3();
+            player.totalHealth = buf.g1_alt1();
         }
 
         if ((mask & PlayerUpdate.FACESQUARE) !== 0) {
             player.faceSquareX = buf.g2();
-            player.faceSquareZ = buf.g2();
+            player.faceSquareZ = buf.g2_alt1();
         }
 
         if ((mask & PlayerUpdate.ANIM) !== 0) {
-            let seqId: number = buf.g2();
+            let seqId: number = buf.g2_alt1();
             if (seqId === 65535) {
                 seqId = -1;
             }
 
-            if (seqId === player.primaryAnim) {
-                player.primaryAnimLoop = 0;
-            }
-
-            const delay: number = buf.g1();
-            if (player.primaryAnim === seqId && seqId !== -1) {
-                const restartMode = SeqType.list(seqId).duplicatebehaviour;
-
-                if (restartMode == RestartMode.RESET) {
-                    player.primaryAnimFrame = 0;
-                    player.primaryAnimCycle = 0;
-                    player.primaryAnimDelay = delay;
-                    player.primaryAnimLoop = 0;
-                } else if (restartMode == RestartMode.RESETLOOP) {
-                    player.primaryAnimLoop = 0;
-                }
-            } else if (seqId === -1 || player.primaryAnim === -1 || SeqType.list(seqId).priority >= SeqType.list(player.primaryAnim).priority) {
-                player.primaryAnim = seqId;
-                player.primaryAnimFrame = 0;
-                player.primaryAnimCycle = 0;
-                player.primaryAnimDelay = delay;
-                player.primaryAnimLoop = 0;
-                player.preanimRouteLength = player.routeLength;
-            }
+            const delay: number = buf.g1_alt2();
+            this.triggerPlayerAnim(seqId, delay, player);
         }
 
         if ((mask & PlayerUpdate.FACEENTITY) !== 0) {
-            player.faceEntity = buf.g2();
+            player.faceEntity = buf.g2_alt2();
             if (player.faceEntity === 65535) {
                 player.faceEntity = -1;
             }
@@ -8607,22 +8693,22 @@ export class Client extends GameShell {
 
         if ((mask & PlayerUpdate.HITMARK2) !== 0) {
             const damage = buf.g1();
-            const damageType = buf.g1();
+            const damageType = buf.g1_alt1();
 
             player.addHitmark(damageType, this.loopCycle, damage);
-            player.combatCycle = this.loopCycle + 400;
-            player.health = buf.g1();
-            player.totalHealth = buf.g1();
+            player.combatCycle = this.loopCycle + 300;
+            player.health = buf.g1_alt1();
+            player.totalHealth = buf.g1_alt1();
         }
 
         if ((mask & PlayerUpdate.EXACTMOVE) !== 0) {
-            player.exactStartX = buf.g1();
-            player.exactStartZ = buf.g1();
+            player.exactStartX = buf.g1_alt3();
+            player.exactStartZ = buf.g1_alt3();
             player.exactEndX = buf.g1();
             player.exactEndZ = buf.g1();
-            player.exactMoveEnd = buf.g2() + this.loopCycle;
-            player.exactMoveStart = buf.g2() + this.loopCycle;
-            player.exactMoveFacing = buf.g1();
+            player.exactMoveEnd = buf.g2_alt2() + this.loopCycle;
+            player.exactMoveStart = buf.g2_alt3() + this.loopCycle;
+            player.exactMoveFacing = buf.g1_alt1();
 
             player.abortRoute();
         }
@@ -8692,20 +8778,20 @@ export class Client extends GameShell {
         }
 
         if ((mask & PlayerUpdate.SPOTANIM) !== 0) {
-            player.spotanimId = buf.g2();
-            const heightDelay: number = buf.g4();
+            player.spotanimId = buf.g2_alt1();
+            const heightDelay: number = buf.g4_alt3();
 
-            player.spotanimHeight = heightDelay >> 16;
-            player.spotanimLastCycle = this.loopCycle + (heightDelay & 0xffff);
             player.spotanimFrame = 0;
             player.spotanimCycle = 0;
-
-            if (player.spotanimLastCycle > this.loopCycle) {
-                player.spotanimFrame = -1;
-            }
+            player.spotanimLastCycle = this.loopCycle + (heightDelay & 0xffff);
 
             if (player.spotanimId === 65535) {
                 player.spotanimId = -1;
+            }
+
+            player.spotanimHeight = heightDelay >> 16;
+            if (player.spotanimLastCycle > this.loopCycle) {
+                player.spotanimFrame = -1;
             }
         }
 
@@ -8725,6 +8811,29 @@ export class Client extends GameShell {
             player.chatColour = 0;
             player.chatEffect = 0;
             player.chatTimer = 150;
+        }
+    }
+
+    private triggerPlayerAnim(seqId: number, delay: number, player: ClientPlayer): void {
+        if (player.primaryAnim === seqId && seqId !== -1) {
+            const restartMode: number = SeqType.list(seqId).duplicatebehaviour;
+            if (restartMode === RestartMode.RESET) {
+                player.primaryAnimFrame = 0;
+                player.primaryAnimLoop = 0;
+                player.primaryAnimDelay = delay;
+                player.primaryAnimCycle = 0;
+            }
+            if (restartMode === RestartMode.RESETLOOP) {
+                player.primaryAnimLoop = 0;
+                return;
+            }
+        } else if (seqId === -1 || player.primaryAnim === -1 || SeqType.list(seqId).priority >= SeqType.list(player.primaryAnim).priority) {
+            player.preanimRouteLength = player.routeLength;
+            player.primaryAnimFrame = 0;
+            player.primaryAnimCycle = 0;
+            player.primaryAnimLoop = 0;
+            player.primaryAnimDelay = delay;
+            player.primaryAnim = seqId;
         }
     }
 
@@ -8911,89 +9020,24 @@ export class Client extends GameShell {
 
             const mask: number = buf.g1();
 
-            if ((mask & NpcUpdate.HITMARK2) !== 0) {
-                const damage = buf.g1();
-                const damageType = buf.g1();
-
-                npc.addHitmark(damageType, this.loopCycle, damage);
-                npc.combatCycle = this.loopCycle + 400;
-                npc.health = buf.g1();
-                npc.totalHealth = buf.g1();
-            }
-
-            if ((mask & NpcUpdate.ANIM) !== 0) {
-                let anim: number = buf.g2();
-                if (anim === 65535) {
-                    anim = -1;
-                }
-
-                if (anim === npc.primaryAnim) {
-                    npc.primaryAnimLoop = 0;
-                }
-
-                const delay: number = buf.g1();
-                if (npc.primaryAnim === anim && anim !== -1) {
-                    const restartMode = SeqType.list(anim).duplicatebehaviour;
-
-                    if (restartMode == RestartMode.RESET) {
-                        npc.primaryAnimFrame = 0;
-                        npc.primaryAnimCycle = 0;
-                        npc.primaryAnimDelay = delay;
-                        npc.primaryAnimLoop = 0;
-                    } else if (restartMode == RestartMode.RESETLOOP) {
-                        npc.primaryAnimLoop = 0;
-                    }
-                } else if (anim === -1 || npc.primaryAnim === -1 || SeqType.list(anim).priority >= SeqType.list(npc.primaryAnim).priority) {
-                    npc.primaryAnim = anim;
-                    npc.primaryAnimFrame = 0;
-                    npc.primaryAnimCycle = 0;
-                    npc.primaryAnimDelay = delay;
-                    npc.primaryAnimLoop = 0;
-                    npc.preanimRouteLength = npc.routeLength;
-                }
-            }
-
-            if ((mask & NpcUpdate.FACEENTITY) !== 0) {
-                npc.faceEntity = buf.g2();
-                if (npc.faceEntity === 65535) {
-                    npc.faceEntity = -1;
-                }
-            }
-
-            if ((mask & NpcUpdate.SAY) !== 0) {
-                npc.chatMessage = buf.gjstr();
-                npc.chatTimer = 100;
-            }
-
             if ((mask & NpcUpdate.HITMARK) !== 0) {
-                const damage = buf.g1();
-                const damageType = buf.g1();
+                const damage = buf.g1_alt1();
+                const damageType = buf.g1_alt3();
 
                 npc.addHitmark(damageType, this.loopCycle, damage);
-                npc.combatCycle = this.loopCycle + 400;
-                npc.health = buf.g1();
+                npc.combatCycle = this.loopCycle + 300;
+                npc.health = buf.g1_alt1();
                 npc.totalHealth = buf.g1();
-            }
-
-            if ((mask & NpcUpdate.CHANGETYPE) !== 0) {
-                npc.type = NpcType.list(buf.g2());
-                npc.size = npc.type.size;
-                npc.turnspeed = npc.type.turnspeed;
-                npc.walkanim = npc.type.walkanim;
-                npc.walkanim_b = npc.type.walkanim_b;
-                npc.walkanim_l = npc.type.walkanim_l;
-                npc.walkanim_r = npc.type.walkanim_r;
-                npc.readyanim = npc.type.readyanim;
             }
 
             if ((mask & NpcUpdate.SPOTANIM) !== 0) {
-                npc.spotanimId = buf.g2();
+                npc.spotanimId = buf.g2_alt3();
                 const info: number = buf.g4();
 
-                npc.spotanimHeight = info >> 16;
-                npc.spotanimLastCycle = this.loopCycle + (info & 0xffff);
-                npc.spotanimFrame = 0;
                 npc.spotanimCycle = 0;
+                npc.spotanimLastCycle = this.loopCycle + (info & 0xffff);
+                npc.spotanimHeight = info >> 16;
+                npc.spotanimFrame = 0;
 
                 if (npc.spotanimLastCycle > this.loopCycle) {
                     npc.spotanimFrame = -1;
@@ -9004,9 +9048,72 @@ export class Client extends GameShell {
                 }
             }
 
+            if ((mask & NpcUpdate.FACEENTITY) !== 0) {
+                npc.faceEntity = buf.g2_alt2();
+                if (npc.faceEntity === 65535) {
+                    npc.faceEntity = -1;
+                }
+            }
+
+            if ((mask & NpcUpdate.HITMARK2) !== 0) {
+                const damage = buf.g1_alt1();
+                const damageType = buf.g1();
+
+                npc.addHitmark(damageType, this.loopCycle, damage);
+                npc.combatCycle = this.loopCycle + 300;
+                npc.health = buf.g1_alt3();
+                npc.totalHealth = buf.g1_alt3();
+            }
+
+            if ((mask & NpcUpdate.SAY) !== 0) {
+                npc.chatMessage = buf.gjstr();
+                npc.chatTimer = 100;
+            }
+
+            if ((mask & NpcUpdate.CHANGETYPE) !== 0) {
+                npc.type = NpcType.list(buf.g2_alt2());
+                npc.turnrightanim = npc.type.turnrightanim;
+                npc.turnspeed = npc.type.turnspeed;
+                npc.walkanim_r = npc.type.walkanim_r;
+                npc.readyanim = npc.type.readyanim;
+                npc.walkanim = npc.type.walkanim;
+                npc.turnleftanim = npc.type.turnleftanim;
+                npc.size = npc.type.size;
+                npc.walkanim_l = npc.type.walkanim_l;
+                npc.walkanim_b = npc.type.walkanim_b;
+            }
+
             if ((mask & NpcUpdate.FACESQUARE) !== 0) {
-                npc.faceSquareX = buf.g2();
-                npc.faceSquareZ = buf.g2();
+                npc.faceSquareX = buf.g2_alt2();
+                npc.faceSquareZ = buf.g2_alt1();
+            }
+
+            if ((mask & NpcUpdate.ANIM) !== 0) {
+                let anim: number = buf.g2_alt2();
+                if (anim === 65535) {
+                    anim = -1;
+                }
+
+                const delay: number = buf.g1_alt2();
+                if (npc.primaryAnim === anim && anim !== -1) {
+                    const restartMode = SeqType.list(anim).duplicatebehaviour;
+
+                    if (restartMode == RestartMode.RESET) {
+                        npc.primaryAnimCycle = 0;
+                        npc.primaryAnimLoop = 0;
+                        npc.primaryAnimFrame = 0;
+                        npc.primaryAnimDelay = delay;
+                    } else if (restartMode == RestartMode.RESETLOOP) {
+                        npc.primaryAnimLoop = 0;
+                    }
+                } else if (anim === -1 || npc.primaryAnim === -1 || SeqType.list(anim).priority >= SeqType.list(npc.primaryAnim).priority) {
+                    npc.primaryAnim = anim;
+                    npc.primaryAnimCycle = 0;
+                    npc.primaryAnimDelay = delay;
+                    npc.primaryAnimFrame = 0;
+                    npc.primaryAnimLoop = 0;
+                    npc.preanimRouteLength = npc.routeLength;
+                }
             }
         }
     }
@@ -9879,6 +9986,24 @@ export class Client extends GameShell {
             }
         }
 
+        if (action === MiniMenuAction.OP_V3_HELD6) {
+            let com: IfType | null = IfType.get(c);
+            if (com && com.subcomponents && b !== -1) {
+                com = com.subcomponents[b];
+            }
+
+            if (!com || com.invcount < 100000) {
+                this.out.p1Enc(ClientProt.OPOBJE);
+                if (RuneJsServerProt) {
+                    this.out.p2_alt1(a);
+                } else {
+                    this.out.p2_alt3(a);
+                }
+            } else {
+                this.addChat(0, com.invcount + ' x ' + ObjType.list(a).name, '');
+            }
+        }
+
         if (action === MiniMenuAction.USEHELD_START) {
             this.useMode = 1;
             this.objSelectedSlot = b;
@@ -10115,6 +10240,12 @@ export class Client extends GameShell {
 
         if (action === MiniMenuAction.CLOSE_BUTTON) {
             this.closeModal();
+        }
+
+        if (action === MiniMenuAction.CLOSE_TUTORIAL) {
+            this.closeInterface(this.tutComId);
+            this.tutComId = -1;
+            this.redrawChat = true;
         }
 
         if (action === MiniMenuAction.ABUSE_REPORT) {
@@ -10606,14 +10737,84 @@ export class Client extends GameShell {
             }
 
             if (child.type === 0) {
-                if ((!child.hide || this.overComVisible(area, childIndex, child.id)) && mouseX >= childX && mouseY >= childY && mouseX <= childX + child.width && mouseY <= childY + child.height) {
-                    this.addComponentOptions(components, child.id & 0xffff, mouseX, mouseY, childX, childY, child.scrollPos, area);
+                if ((!child.hide || this.overComVisible(area, childIndex)) && mouseX >= childX && mouseY >= childY && mouseX < childX + child.width && mouseY < childY + child.height) {
+                    this.addComponentOptions(components, childIndex, mouseX, mouseY, childX, childY, child.scrollPosY, area);
+
+                    if (child.subcomponents) {
+                        this.addComponentOptions(child.subcomponents, child.parentId, mouseX, mouseY, childX, childY, child.scrollPosY, area);
+                    }
                 }
 
-                if (child.scrollHeight > child.height) {
-                    this.doScrollbar(mouseX, mouseY, child.scrollHeight, child.height, true, childX + child.width, childY, child);
+                if (child.scrollPos > child.height) {
+                    this.doScrollbar(mouseX, mouseY, child.scrollPos, child.height, true, childX + child.width, childY, child);
                 }
-            } else if (child.type === 2) {
+                continue;
+            }
+
+            if (mouseX >= childX && mouseY >= childY && mouseX < childX + child.width && mouseY < childY + child.height) {
+                if (child.buttonType === ButtonType.BUTTON_OK) {
+                    let override: boolean = false;
+                    if (child.clientCode !== 0) {
+                        override = this.addSocialOptions(child);
+                    }
+
+                    if (!override) {
+                        this.menuOption[this.menuNumEntries] = child.buttonText ?? '';
+                        this.menuAction[this.menuNumEntries] = MiniMenuAction.IF_BUTTON;
+                        this.menuParamA[this.menuNumEntries] = 0;
+                        this.menuParamB[this.menuNumEntries] = 0;
+                        this.menuParamC[this.menuNumEntries] = child.parentId;
+                        this.menuNumEntries++;
+                    }
+                }
+
+                if (child.buttonType === ButtonType.BUTTON_TARGET && this.targetMode === 0) {
+                    this.menuOption[this.menuNumEntries] = (child.targetVerb ?? '') + ' @gre@' + (child.targetBase ?? '');
+                    this.menuAction[this.menuNumEntries] = MiniMenuAction.TGT_BUTTON;
+                    this.menuParamA[this.menuNumEntries] = 0;
+                    this.menuParamB[this.menuNumEntries] = 0;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+                }
+
+                if (child.buttonType === ButtonType.BUTTON_CLOSE) {
+                    this.menuOption[this.menuNumEntries] = 'Close';
+                    this.menuAction[this.menuNumEntries] = area === 3 ? MiniMenuAction.CLOSE_TUTORIAL : MiniMenuAction.CLOSE_BUTTON;
+                    this.menuParamA[this.menuNumEntries] = 0;
+                    this.menuParamB[this.menuNumEntries] = 0;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+                }
+
+                if (child.buttonType === ButtonType.BUTTON_TOGGLE) {
+                    this.menuOption[this.menuNumEntries] = child.buttonText ?? '';
+                    this.menuAction[this.menuNumEntries] = MiniMenuAction.TOGGLE_BUTTON;
+                    this.menuParamA[this.menuNumEntries] = 0;
+                    this.menuParamB[this.menuNumEntries] = 0;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+                }
+
+                if (child.buttonType === ButtonType.BUTTON_SELECT) {
+                    this.menuOption[this.menuNumEntries] = child.buttonText ?? '';
+                    this.menuAction[this.menuNumEntries] = MiniMenuAction.SELECT_BUTTON;
+                    this.menuParamA[this.menuNumEntries] = 0;
+                    this.menuParamB[this.menuNumEntries] = 0;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+                }
+
+                if (child.buttonType === ButtonType.BUTTON_CONTINUE && !this.resumedPauseButton) {
+                    this.menuOption[this.menuNumEntries] = child.buttonText ?? '';
+                    this.menuAction[this.menuNumEntries] = MiniMenuAction.PAUSE_BUTTON;
+                    this.menuParamA[this.menuNumEntries] = 0;
+                    this.menuParamB[this.menuNumEntries] = 0;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+                }
+            }
+
+            if (child.type === 2) {
                 let slot: number = 0;
 
                 for (let row: number = 0; row < child.height; row++) {
@@ -10632,7 +10833,7 @@ export class Client extends GameShell {
                         }
 
                         this.hoveredSlot = slot;
-                        this.hoveredSlotComId = child.id;
+                        this.hoveredSlotComId = child.parentId;
 
                         if (!child.linkObjType || child.linkObjType[slot] <= 0) {
                             slot++;
@@ -10642,12 +10843,12 @@ export class Client extends GameShell {
                         const obj: ObjType = ObjType.list(child.linkObjType[slot] - 1);
 
                         if (this.useMode === 1 && child.objOps) {
-                            if (child.id !== this.objSelectedComId || slot !== this.objSelectedSlot) {
+                            if (child.parentId !== this.objSelectedComId || slot !== this.objSelectedSlot) {
                                 this.menuOption[this.menuNumEntries] = 'Use ' + this.objSelectedName + ' with @lre@' + obj.name;
                                 this.menuAction[this.menuNumEntries] = MiniMenuAction.USEHELD_ONHELD;
                                 this.menuParamA[this.menuNumEntries] = obj.id;
                                 this.menuParamB[this.menuNumEntries] = slot;
-                                this.menuParamC[this.menuNumEntries] = child.id;
+                                this.menuParamC[this.menuNumEntries] = child.parentId;
                                 this.menuNumEntries++;
                             }
                         } else if (this.targetMode === 1 && child.objOps) {
@@ -10656,7 +10857,7 @@ export class Client extends GameShell {
                                 this.menuAction[this.menuNumEntries] = MiniMenuAction.TGT_HELD;
                                 this.menuParamA[this.menuNumEntries] = obj.id;
                                 this.menuParamB[this.menuNumEntries] = slot;
-                                this.menuParamC[this.menuNumEntries] = child.id;
+                                this.menuParamC[this.menuNumEntries] = child.parentId;
                                 this.menuNumEntries++;
                             }
                         } else {
@@ -10673,14 +10874,14 @@ export class Client extends GameShell {
 
                                         this.menuParamA[this.menuNumEntries] = obj.id;
                                         this.menuParamB[this.menuNumEntries] = slot;
-                                        this.menuParamC[this.menuNumEntries] = child.id;
+                                        this.menuParamC[this.menuNumEntries] = child.parentId;
                                         this.menuNumEntries++;
                                     } else if (op === 4) {
                                         this.menuOption[this.menuNumEntries] = 'Drop @lre@' + obj.name;
                                         this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD5;
                                         this.menuParamA[this.menuNumEntries] = obj.id;
                                         this.menuParamB[this.menuNumEntries] = slot;
-                                        this.menuParamC[this.menuNumEntries] = child.id;
+                                        this.menuParamC[this.menuNumEntries] = child.parentId;
                                         this.menuNumEntries++;
                                     }
                                 }
@@ -10691,7 +10892,7 @@ export class Client extends GameShell {
                                 this.menuAction[this.menuNumEntries] = MiniMenuAction.USEHELD_START;
                                 this.menuParamA[this.menuNumEntries] = obj.id;
                                 this.menuParamB[this.menuNumEntries] = slot;
-                                this.menuParamC[this.menuNumEntries] = child.id;
+                                this.menuParamC[this.menuNumEntries] = child.parentId;
                                 this.menuNumEntries++;
                             }
 
@@ -10710,7 +10911,7 @@ export class Client extends GameShell {
 
                                         this.menuParamA[this.menuNumEntries] = obj.id;
                                         this.menuParamB[this.menuNumEntries] = slot;
-                                        this.menuParamC[this.menuNumEntries] = child.id;
+                                        this.menuParamC[this.menuNumEntries] = child.parentId;
                                         this.menuNumEntries++;
                                     }
                                 }
@@ -10735,7 +10936,7 @@ export class Client extends GameShell {
 
                                         this.menuParamA[this.menuNumEntries] = obj.id;
                                         this.menuParamB[this.menuNumEntries] = slot;
-                                        this.menuParamC[this.menuNumEntries] = child.id;
+                                        this.menuParamC[this.menuNumEntries] = child.parentId;
                                         this.menuNumEntries++;
                                     }
                                 }
@@ -10745,70 +10946,104 @@ export class Client extends GameShell {
                             this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD6;
                             this.menuParamA[this.menuNumEntries] = obj.id;
                             this.menuParamB[this.menuNumEntries] = slot;
-                            this.menuParamC[this.menuNumEntries] = child.id;
+                            this.menuParamC[this.menuNumEntries] = child.parentId;
                             this.menuNumEntries++;
                         }
 
                         slot++;
                     }
                 }
-            } else if (mouseX >= childX && mouseY >= childY && mouseX < childX + child.width && mouseY < childY + child.height) {
-                if (child.buttonType === ButtonType.BUTTON_OK) {
-                    let override: boolean = false;
-                    if (child.clientCode !== 0) {
-                        override = this.addSocialOptions(child);
-                    }
+            }
 
-                    if (!override && child.buttonText) {
-                        this.menuOption[this.menuNumEntries] = child.buttonText;
-                        this.menuAction[this.menuNumEntries] = MiniMenuAction.IF_BUTTON;
-                        this.menuParamC[this.menuNumEntries] = child.id;
+            if (child.v3 && child.invobject !== -1 && mouseX >= childX && mouseY >= childY && mouseX < childX + child.width && mouseY < childY + child.height) {
+                const obj: ObjType = ObjType.list(child.invobject);
+                if (child.objOps) {
+                    const ops = obj.iop;
+                    if (!ops || !ops[4]) {
+                        this.menuOption[this.menuNumEntries] = 'Drop @lre@' + obj.name;
+                    } else {
+                        this.menuOption[this.menuNumEntries] = ops[4] + ' @lre@' + obj.name;
+                    }
+                    this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD5;
+                    this.menuParamA[this.menuNumEntries] = obj.id;
+                    this.menuParamB[this.menuNumEntries] = child.field2542 - 1;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                    this.menuNumEntries++;
+
+                    if (ops?.[3]) {
+                        this.menuOption[this.menuNumEntries] = ops[3] + ' @lre@' + obj.name;
+                        this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD4;
+                        this.menuParamA[this.menuNumEntries] = obj.id;
+                        this.menuParamB[this.menuNumEntries] = child.field2542 - 1;
+                        this.menuParamC[this.menuNumEntries] = child.parentId;
                         this.menuNumEntries++;
                     }
-                } else if (child.buttonType === ButtonType.BUTTON_TARGET && this.targetMode === 0) {
-                    let prefix: string | null = child.targetVerb;
-                    if (prefix && prefix.indexOf(' ') !== -1) {
-                        prefix = prefix.substring(0, prefix.indexOf(' '));
+
+                    if (ops?.[2]) {
+                        this.menuOption[this.menuNumEntries] = ops[2] + ' @lre@' + obj.name;
+                        this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD3;
+                        this.menuParamA[this.menuNumEntries] = obj.id;
+                        this.menuParamB[this.menuNumEntries] = child.field2542 - 1;
+                        this.menuParamC[this.menuNumEntries] = child.parentId;
+                        this.menuNumEntries++;
                     }
 
-                    this.menuOption[this.menuNumEntries] = prefix + ' @gre@' + child.targetBase;
-                    this.menuAction[this.menuNumEntries] = MiniMenuAction.TGT_BUTTON;
-                    this.menuParamC[this.menuNumEntries] = child.id;
-                    this.menuNumEntries++;
-                } else if (child.buttonType === ButtonType.BUTTON_CLOSE) {
-                    this.menuOption[this.menuNumEntries] = 'Close';
-                    this.menuAction[this.menuNumEntries] = MiniMenuAction.CLOSE_BUTTON;
-                    this.menuParamC[this.menuNumEntries] = child.id;
-                    this.menuNumEntries++;
-                } else if (child.buttonType === ButtonType.BUTTON_TOGGLE && child.buttonText) {
-                    this.menuOption[this.menuNumEntries] = child.buttonText;
-                    this.menuAction[this.menuNumEntries] = MiniMenuAction.TOGGLE_BUTTON;
-                    this.menuParamC[this.menuNumEntries] = child.id;
-                    this.menuNumEntries++;
-                } else if (child.buttonType === ButtonType.BUTTON_SELECT && child.buttonText) {
-                    this.menuOption[this.menuNumEntries] = child.buttonText;
-                    this.menuAction[this.menuNumEntries] = MiniMenuAction.SELECT_BUTTON;
-                    this.menuParamC[this.menuNumEntries] = child.id;
-                    this.menuNumEntries++;
-                } else if (child.buttonType === ButtonType.BUTTON_CONTINUE && !this.resumedPauseButton && child.buttonText) {
-                    this.menuOption[this.menuNumEntries] = child.buttonText;
-                    this.menuAction[this.menuNumEntries] = MiniMenuAction.PAUSE_BUTTON;
-                    this.menuParamC[this.menuNumEntries] = child.id;
-                    this.menuNumEntries++;
+                    if (ops?.[1]) {
+                        this.menuOption[this.menuNumEntries] = ops[1] + ' @lre@' + obj.name;
+                        this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD2;
+                        this.menuParamA[this.menuNumEntries] = obj.id;
+                        this.menuParamB[this.menuNumEntries] = child.field2542 - 1;
+                        this.menuParamC[this.menuNumEntries] = child.parentId;
+                        this.menuNumEntries++;
+                    }
+
+                    if (ops?.[0]) {
+                        this.menuOption[this.menuNumEntries] = ops[0] + ' @lre@' + obj.name;
+                        this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_HELD1;
+                        this.menuParamA[this.menuNumEntries] = obj.id;
+                        this.menuParamB[this.menuNumEntries] = child.field2542 - 1;
+                        this.menuParamC[this.menuNumEntries] = child.parentId;
+                        this.menuNumEntries++;
+                    }
                 }
 
+                this.menuOption[this.menuNumEntries] = 'Examine @lre@' + obj.name;
+                this.menuAction[this.menuNumEntries] = MiniMenuAction.OP_V3_HELD6;
+                this.menuParamA[this.menuNumEntries] = obj.id;
+                if (child.parentId >= 0) {
+                    this.menuParamB[this.menuNumEntries] = -1;
+                    this.menuParamC[this.menuNumEntries] = child.parentId;
+                } else {
+                    this.menuParamB[this.menuNumEntries] = child.parentId & 0x7fff;
+                    this.menuParamC[this.menuNumEntries] = child.layerId;
+                }
+                this.menuNumEntries++;
+            }
+
+            if (mouseX >= childX && mouseY >= childY && mouseX < childX + child.width && mouseY < childY + child.height) {
                 if (child.hashook && child.opNames) {
+                    let suffix = '';
+                    if (child.invobject !== -1) {
+                        const obj = ObjType.list(child.invobject);
+                        suffix = ' @lre@' + obj.name;
+                    }
+
                     for (let op = child.opNames.length - 1; op >= 0; op--) {
                         const name = child.opNames[op];
                         if (!name) {
                             continue;
                         }
 
-                        this.menuOption[this.menuNumEntries] = name;
+                        this.menuOption[this.menuNumEntries] = name + suffix;
                         this.menuAction[this.menuNumEntries] = MiniMenuAction.IF_BUTTONX;
                         this.menuParamA[this.menuNumEntries] = op + 1;
-                        this.menuParamB[this.menuNumEntries] = 0;
-                        this.menuParamC[this.menuNumEntries] = child.id;
+                        if (child.parentId < 0) {
+                            this.menuParamB[this.menuNumEntries] = child.parentId & 0x7fff;
+                            this.menuParamC[this.menuNumEntries] = child.layerId;
+                        } else {
+                            this.menuParamB[this.menuNumEntries] = 0;
+                            this.menuParamC[this.menuNumEntries] = child.parentId;
+                        }
                         this.menuNumEntries++;
                     }
                 }
@@ -10886,13 +11121,8 @@ export class Client extends GameShell {
     }
 
     private drawLayer(area: number, components: IfType[], layerId: number, x: number, y: number, scrollX: number, scrollY: number, clipBottom: number, clipRight: number, parentLayer: IfType | null): boolean {
-        const left: number = Pix2D.clipMinX;
-        const top: number = Pix2D.clipMinY;
-        const right: number = Pix2D.clipMaxX;
-        const bottom: number = Pix2D.clipMaxY;
+        Pix2D.setSubClipping(x, y, clipRight, clipBottom);
         let ready: boolean = true;
-
-        Pix2D.setClipping(x, y, clipRight, clipBottom);
 
         for (let childIndex: number = 0; childIndex < components.length; childIndex++) {
             const child = components[childIndex];
@@ -10911,30 +11141,58 @@ export class Client extends GameShell {
                 childY -= scrollY;
             }
 
+            let trans: number = child.trans;
+            if (this.field548 === child) {
+                trans = 128;
+                const dragLayer: IfType = this.getDragLayer(child)!;
+                const dragLayerPos: number[] = this.getComponentPosition(dragLayer)!;
+                const childPos: number[] = this.getComponentPosition(child)!;
+                let dragY: number = childPos[1] + ClientMouseListener.mouseY - dragLayerPos[1] - this.field2392;
+                if (dragY < 0) {
+                    dragY = 0;
+                }
+                if (dragY + child.height > dragLayer.height) {
+                    dragY = dragLayer.height - child.height;
+                }
+                childY = dragLayerPos[1] + dragY;
+                let dragX: number = ClientMouseListener.mouseX + childPos[0] - dragLayerPos[0] - this.field419;
+                if (dragX < 0) {
+                    dragX = 0;
+                }
+                if (dragX + child.width > dragLayer.width) {
+                    dragX = dragLayer.width - child.width;
+                }
+                childX = dragLayerPos[0] + dragX;
+            }
+
             if (child.v3 && (Pix2D.clipMaxX < childX || Pix2D.clipMaxY < childY || childX + child.width < Pix2D.clipMinX || childY + child.height < Pix2D.clipMinY)) {
                 continue;
             }
 
             if (child.type === ComponentType.TYPE_LAYER) {
-                if (child.hide && !this.overComVisible(area, childIndex, child.id)) {
+                if (child.hide && !this.overComVisible(area, childIndex)) {
                     continue;
                 }
 
                 if (!child.v3) {
-                    if (child.scrollPos > child.scrollHeight - child.height) {
-                        child.scrollPos = child.scrollHeight - child.height;
+                    if (child.scrollPosY > child.scrollPos - child.height) {
+                        child.scrollPosY = child.scrollPos - child.height;
                     }
 
-                    if (child.scrollPos < 0) {
-                        child.scrollPos = 0;
+                    if (child.scrollPosY < 0) {
+                        child.scrollPosY = 0;
                     }
                 }
 
-                ready = this.drawLayer(area, components, child.id & 0xffff, childX, childY, child.scrollPosX, child.scrollPos, childY + child.height, childX + child.width, child) && ready;
-                Pix2D.setClipping(x, y, clipRight, clipBottom);
+                ready = this.drawLayer(area, components, childIndex, childX, childY, child.scrollPosX, child.scrollPosY, childY + child.height, childX + child.width, child) && ready;
+                const subcomponents = (child as IfType & { subcomponents?: IfType[] | null }).subcomponents;
+                if (subcomponents) {
+                    ready = this.drawLayer(area, subcomponents, child.parentId, childX, childY, child.scrollPosX, child.scrollPosY, childY + child.height, childX + child.width, child) && ready;
+                }
+                Pix2D.setSubClipping(x, y, clipRight, clipBottom);
 
-                if (child.scrollHeight > child.height) {
-                    this.drawScrollbar(childX + child.width, childY, child.scrollPos, child.scrollHeight, child.height);
+                if (child.scrollPos > child.height) {
+                    this.drawScrollbar(childX + child.width, childY, child.scrollPosY, child.scrollPos, child.height);
                 }
             } else if (child.type === ComponentType.TYPE_INV) {
                 let slot: number = 0;
@@ -10960,13 +11218,13 @@ export class Client extends GameShell {
 
                             if ((slotX > Pix2D.clipMinX - 32 && slotX < Pix2D.clipMaxX && slotY > Pix2D.clipMinY - 32 && slotY < Pix2D.clipMaxY) || (this.objDragArea !== 0 && this.objDragSlot === slot)) {
                                 let outline = 0;
-                                if (this.useMode == 1 && this.objSelectedSlot == slot && this.objSelectedComId == child.id) {
+                                if (this.useMode == 1 && this.objSelectedSlot == slot && this.objSelectedComId == child.parentId) {
                                     outline = 16777215;
                                 }
 
                                 const icon: Pix32 | null = ObjType.getSprite(id, child.linkObjNumber[slot], outline);
                                 if (icon) {
-                                    if (this.objDragArea !== 0 && this.objDragSlot === slot && this.objDragComId === child.id) {
+                                    if (this.objDragArea !== 0 && this.objDragSlot === slot && this.objDragComId === child.parentId) {
                                         dx = ClientMouseListener.mouseX - this.objGrabX;
                                         dy = ClientMouseListener.mouseY - this.objGrabY;
 
@@ -10985,34 +11243,34 @@ export class Client extends GameShell {
 
                                         icon.transPlotSprite(slotX + dx, slotY + dy, 128);
 
-                                        if (parentLayer && slotY + dy < Pix2D.clipMinY && parentLayer.scrollPos > 0) {
-                                            let autoscroll = ((Pix2D.clipMinY - slotY - dy) * this.worldUpdateNum) / 3;
+                                        if (parentLayer && slotY + dy < Pix2D.clipMinY && parentLayer.scrollPosY > 0) {
+                                            let autoscroll = (((Pix2D.clipMinY - slotY - dy) * this.worldUpdateNum) / 3) | 0;
                                             if (autoscroll > this.worldUpdateNum * 10) {
                                                 autoscroll = this.worldUpdateNum * 10;
                                             }
 
-                                            if (autoscroll > parentLayer.scrollPos) {
-                                                autoscroll = parentLayer.scrollPos;
+                                            if (autoscroll > parentLayer.scrollPosY) {
+                                                autoscroll = parentLayer.scrollPosY;
                                             }
 
-                                            parentLayer.scrollPos -= autoscroll;
+                                            parentLayer.scrollPosY -= autoscroll;
                                             this.objGrabY += autoscroll;
                                         }
 
-                                        if (parentLayer && slotY + dy + 32 > Pix2D.clipMaxY && parentLayer.scrollPos < parentLayer.scrollHeight - parentLayer.height) {
-                                            let autoscroll = ((slotY + dy + 32 - Pix2D.clipMaxY) * this.worldUpdateNum) / 3;
+                                        if (parentLayer && slotY + dy + 32 > Pix2D.clipMaxY && parentLayer.scrollPosY < parentLayer.scrollPos - parentLayer.height) {
+                                            let autoscroll = (((slotY + dy + 32 - Pix2D.clipMaxY) * this.worldUpdateNum) / 3) | 0;
                                             if (autoscroll > this.worldUpdateNum * 10) {
                                                 autoscroll = this.worldUpdateNum * 10;
                                             }
 
-                                            if (autoscroll > parentLayer.scrollHeight - parentLayer.height - parentLayer.scrollPos) {
-                                                autoscroll = parentLayer.scrollHeight - parentLayer.height - parentLayer.scrollPos;
+                                            if (autoscroll > parentLayer.scrollPos - parentLayer.height - parentLayer.scrollPosY) {
+                                                autoscroll = parentLayer.scrollPos - parentLayer.height - parentLayer.scrollPosY;
                                             }
 
-                                            parentLayer.scrollPos += autoscroll;
+                                            parentLayer.scrollPosY += autoscroll;
                                             this.objGrabY -= autoscroll;
                                         }
-                                    } else if (this.selectedArea !== 0 && this.selectedItem === slot && this.selectedComId === child.id) {
+                                    } else if (this.selectedArea !== 0 && this.selectedItem === slot && this.selectedComId === child.parentId) {
                                         icon.transPlotSprite(slotX, slotY, 128);
                                     } else {
                                         icon.plotSprite(slotX, slotY);
@@ -11040,7 +11298,7 @@ export class Client extends GameShell {
                     }
                 }
             } else if (child.type === ComponentType.TYPE_RECT) {
-                const hovered: boolean = this.overComVisible(area, childIndex, child.id);
+                const hovered: boolean = this.overComVisible(area, childIndex);
 
                 let colour: number = 0;
                 if (this.getIfActive(child)) {
@@ -11064,16 +11322,15 @@ export class Client extends GameShell {
                         Pix2D.drawRect(childX, childY, child.width, child.height, colour);
                     }
                 } else if (child.fill) {
-                    Pix2D.fillRectTrans(childX, childY, child.width, child.height, colour, 256 - (child.trans & 0xff));
+                    Pix2D.fillRectTrans(childX, childY, child.width, child.height, colour, 256 - (trans & 0xff));
                 } else {
-                    Pix2D.drawRect(childX, childY, child.width, child.height, colour);
-                    Pix2D.drawRectTrans(childX, childY, child.width, child.height, colour, 256 - (child.trans & 0xff));
+                    Pix2D.drawRectTrans(childX, childY, child.width, child.height, colour, 256 - (trans & 0xff));
                 }
             } else if (child.type === ComponentType.TYPE_TEXT) {
                 const font: PixFont | null = child.getFont();
                 let text: string | null = child.text;
 
-                const hovered: boolean = this.overComVisible(area, childIndex, child.id);
+                const hovered: boolean = this.overComVisible(area, childIndex);
 
                 let colour: number = 0;
                 if (this.getIfActive(child)) {
@@ -11131,21 +11388,19 @@ export class Client extends GameShell {
                 text = this.substituteIfText(child, text);
                 font.drawStringMultiline(text, childX, childY, child.width, child.height, colour, child.shadow, child.hAlign, child.vAlign, child.lineHeight);
             } else if (child.type === ComponentType.TYPE_GRAPHIC) {
-                const image: Pix32 | null = child.getGraphic(this.getIfActive(child));
+                const image: Pix32 | null = child.v3 && child.invobject !== -1 ? ObjType.getSprite(child.invobject, child.invcount, 0) : child.getGraphic(child.v3 ? false : this.getIfActive(child));
                 if (image) {
-                    image.plotSprite(childX, childY);
+                    if (trans === 0) {
+                        image.plotSprite(childX, childY);
+                    } else {
+                        image.transPlotSprite(childX, childY, 256 - (trans & 0xff));
+                    }
                 } else if (IfType.loadingAsset) {
                     ready = false;
                 }
             } else if (child.type === ComponentType.TYPE_MODEL) {
                 const tmpX: number = Pix3D.originX;
                 const tmpY: number = Pix3D.originY;
-
-                Pix3D.originX = childX + ((child.width / 2) | 0);
-                Pix3D.originY = childY + ((child.height / 2) | 0);
-
-                const eyeY: number = (Pix3D.sinTable[child.modelXAn] * child.modelZoom) >> 16;
-                const eyeZ: number = (Pix3D.cosTable[child.modelXAn] * child.modelZoom) >> 16;
 
                 const active: boolean = this.getIfActive(child);
 
@@ -11172,12 +11427,44 @@ export class Client extends GameShell {
                     }
                 }
 
+                let modelXAn: number = child.modelXAn;
+                let modelZAn: number = child.modelZAn;
+                let modelYOf: number = child.modelYOf;
+                let modelYAn: number = child.modelYAn;
+                let modelXOf: number = child.modelXOf;
+                let modelZoom: number = child.modelZoom;
+                if (child.invobject !== -1) {
+                    const obj: ObjType = ObjType.list(child.invobject);
+                    const stackObj: ObjType = obj.getStackSizeAlt(child.invcount);
+                    model = stackObj.getModelLit(true, 1);
+                    modelZAn = stackObj.zan2d;
+                    modelYOf = stackObj.yof2d;
+                    modelXOf = stackObj.xof2d;
+                    modelXAn = stackObj.xan2d;
+                    modelZoom = stackObj.zoom2d;
+                    modelYAn = stackObj.yan2d;
+                    if (child.width > 0) {
+                        modelZoom = (modelZoom * 32 / child.width) | 0;
+                    }
+                }
+
+                Pix3D.originX = childX + ((child.width / 2) | 0);
+                Pix3D.originY = childY + ((child.height / 2) | 0);
+                const eyeY: number = (Pix3D.sinTable[modelXAn] * modelZoom) >> 16;
+                const eyeZ: number = (Pix3D.cosTable[modelXAn] * modelZoom) >> 16;
+
                 if (model) {
-                    model.objRender(0, child.modelYAn, 0, child.modelXAn, 0, eyeY, eyeZ);
+                    if (child.v3) {
+                        model.calcBoundingCylinder();
+                        model.objRender(0, modelYAn, modelZAn, modelXAn, modelXOf, ((model.minY / 2) | 0) + modelYOf + eyeY, modelYOf + eyeZ);
+                    } else {
+                        model.objRender(0, modelYAn, 0, modelXAn, 0, eyeY, eyeZ);
+                    }
                 }
 
                 Pix3D.originX = tmpX;
                 Pix3D.originY = tmpY;
+                Pix3D.setRenderClipping();
             } else if (child.type === ComponentType.TYPE_INV_TEXT) {
                 const font: PixFont | null = child.getFont();
                 if (!font || !child.linkObjType || !child.linkObjNumber) {
@@ -11276,18 +11563,56 @@ export class Client extends GameShell {
             }
         }
 
-        Pix2D.setClipping(left, top, right, bottom);
         return ready;
     }
 
-    private overComVisible(area: number, childIndex: number, childId: number): boolean {
-        if (area === 0) {
-            return this.field2881 === childIndex || this.field2881 === childId;
-        } else if (area === 1) {
-            return this.overSideComId === childIndex || this.overSideComId === childId;
+    private getDragLayer(com: IfType): IfType | null {
+        const group: number = com.parentId < 0 ? com.layerId >> 16 : com.parentId >> 16;
+        if (!IfType.openInterface(group)) {
+            return null;
+        } else if (com.field2544 >= 0) {
+            return IfType.list[group]?.[com.field2544 & 0xffff] ?? null;
+        } else {
+            const parent = IfType.list[group]?.[(com.field2544 >> 15) & 0xffff] as (IfType & { subcomponents?: IfType[] | null }) | undefined;
+            return parent?.subcomponents?.[com.field2544 & 0x7fff] ?? null;
+        }
+    }
+
+    private getComponentPosition(com: IfType): number[] | null {
+        const group: number = com.parentId < 0 ? com.layerId >> 16 : com.parentId >> 16;
+        if (!IfType.openInterface(group)) {
+            return null;
         }
 
-        return (area === 2 || area === 3) && (this.overChatComId === childIndex || this.overChatComId === childId);
+        let posX: number = com.x;
+        let posY: number = com.y;
+        let parentId: number = com.layerId;
+        while (parentId !== -1) {
+            const parent: IfType | null | undefined = IfType.list[group]?.[parentId & 0xffff];
+            if (!parent) {
+                return null;
+            }
+            posX += parent.x;
+            if (!com.field2500) {
+                posX -= parent.scrollPosX;
+            }
+            posY += parent.y;
+            parentId = parent.layerId;
+            if (!com.field2500) {
+                posY -= parent.scrollPosY;
+            }
+        }
+        return [posX, posY];
+    }
+
+    private overComVisible(area: number, childIndex: number): boolean {
+        if (area === 0) {
+            return this.field2881 === childIndex;
+        } else if (area === 1) {
+            return this.overSideComId === childIndex;
+        }
+
+        return (area === 2 || area === 3) && this.overChatComId === childIndex;
     }
 
     private tooltipComVisible(area: number, childIndex: number): boolean {
@@ -11334,13 +11659,13 @@ export class Client extends GameShell {
         this.scrollGrabbed = false;
 
         if (x >= left && x < left + 16 && y >= top && y < top + 16) {
-            com.scrollPos -= this.scrollCycle * 4;
+            com.scrollPosY -= this.scrollCycle * 4;
 
             if (redraw) {
                 this.redrawSide = true;
             }
         } else if (x >= left && x < left + 16 && y >= top + height - 16 && y < top + height) {
-            com.scrollPos += this.scrollCycle * 4;
+            com.scrollPosY += this.scrollCycle * 4;
 
             if (redraw) {
                 this.redrawSide = true;
@@ -11354,7 +11679,7 @@ export class Client extends GameShell {
             const gripY: number = y - top - ((gripSize / 2) | 0) - 16;
             const maxY: number = height - gripSize - 32;
 
-            com.scrollPos = (((scrollableHeight - height) * gripY) / maxY) | 0;
+            com.scrollPosY = (((scrollableHeight - height) * gripY) / maxY) | 0;
 
             if (redraw) {
                 this.redrawSide = true;
@@ -11829,10 +12154,9 @@ export class Client extends GameShell {
                 count = 0;
             }
 
-            com.scrollHeight = count * 15 + 20;
-
-            if (com.scrollHeight <= com.height) {
-                com.scrollHeight = com.height + 1;
+            com.scrollPos = count * 15 + 20;
+            if (com.scrollPos <= com.height) {
+                com.scrollPos = com.height + 1;
             }
         } else if (clientCode >= ClientCode.CC_IGNORES_START && clientCode <= ClientCode.CC_IGNORES_END) {
             clientCode -= ClientCode.CC_IGNORES_START;
@@ -11845,15 +12169,19 @@ export class Client extends GameShell {
                 com.buttonType = 1;
             }
         } else if (clientCode === ClientCode.CC_IGNORES_SIZE) {
-            com.scrollHeight = this.ignoreCount * 15 + 20;
-
-            if (com.scrollHeight <= com.height) {
-                com.scrollHeight = com.height + 1;
+            com.scrollPos = this.ignoreCount * 15 + 20;
+            if (com.scrollPos <= com.height) {
+                com.scrollPos = com.height + 1;
             }
         } else if (clientCode === ClientCode.CC_DESIGN_PREVIEW) {
             com.modelXAn = 150;
             com.modelYAn = ((Math.sin(this.loopCycle / 40.0) * 256.0) | 0) & 0x7ff;
             com.model1Id = 0;
+            com.model1Type = 5;
+        } else if (clientCode === ClientCode.CC_PLAYER_PREVIEW) {
+            com.modelXAn = 150;
+            com.modelYAn = ((Math.sin(this.loopCycle / 40.0) * 256.0) | 0) & 0x7ff;
+            com.model1Id = 1;
             com.model1Type = 5;
         } else if (clientCode === ClientCode.CC_SWITCH_TO_MALE) {
             if (this.idkDesignButton1 === -1) {

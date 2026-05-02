@@ -47,6 +47,7 @@ export const enum ClientCode {
     CC_SWITCH_TO_FEMALE = 325,
     CC_ACCEPT_DESIGN = 326,
     CC_DESIGN_PREVIEW = 327,
+    CC_PLAYER_PREVIEW = 328,
 
     //// ignores
     CC_IGNORES_START = 401,
