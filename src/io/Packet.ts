@@ -1,7 +1,7 @@
 import Linkable2 from '#/datastruct/Linkable2.js';
 import LinkList from '#/datastruct/LinkList.js';
 
-import Isaac from '#/io/Isaac.js';
+import * as ByteArrayPool from '#/io/ByteArrayPool.js';
 
 import { bigIntModPow, bigIntToBytes, bytesToBigInt } from '#/util/JsUtil.js';
 
@@ -9,7 +9,6 @@ export default class Packet extends Linkable2 {
     private static readonly CRC32_POLYNOMIAL: number = 0xedb88320;
 
     private static readonly crctable: Int32Array = new Int32Array(256);
-    private static readonly bitmask: Uint32Array = new Uint32Array(33);
 
     private static readonly cacheMin: LinkList<Packet> = new LinkList();
     private static readonly cacheMid: LinkList<Packet> = new LinkList();
@@ -20,11 +19,6 @@ export default class Packet extends Linkable2 {
     private static cacheMaxCount: number = 0;
 
     static {
-        for (let i: number = 0; i < 32; i++) {
-            Packet.bitmask[i] = (1 << i) - 1;
-        }
-        Packet.bitmask[32] = 0xffffffff;
-
         for (let i: number = 0; i < 256; i++) {
             let remainder: number = i;
 
@@ -52,24 +46,26 @@ export default class Packet extends Linkable2 {
         return Packet.getcrc(src, offset, length) == expected;
     }
 
-    private readonly view: DataView;
+    protected readonly view: DataView;
     readonly data: Uint8Array;
 
     pos: number = 0;
-    bitPos: number = 0;
-    random: Isaac | null = null;
 
-    constructor(src: Uint8Array | Int8Array | null) {
+    constructor(src: (Uint8Array | Int8Array) | number | null) {
         if (!src) {
             throw new Error();
         }
 
         super();
 
-        if (src instanceof Int8Array) {
-            this.data = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+        if (typeof src === 'number') {
+            this.data = ByteArrayPool.alloc(src);
         } else {
-            this.data = src;
+            if (src instanceof Int8Array) {
+                this.data = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+            } else {
+                this.data = src;
+            }
         }
 
         this.view = new DataView(this.data.buffer, this.data.byteOffset, this.data.byteLength);
@@ -81,48 +77,6 @@ export default class Packet extends Linkable2 {
 
     get available(): number {
         return this.view.byteLength - this.pos;
-    }
-
-    static alloc(type: number): Packet {
-        let cached: Packet | null = null;
-        if (type === 0 && Packet.cacheMinCount > 0) {
-            Packet.cacheMinCount--;
-            cached = Packet.cacheMin.popFront();
-        } else if (type === 1 && Packet.cacheMidCount > 0) {
-            Packet.cacheMidCount--;
-            cached = Packet.cacheMid.popFront();
-        } else if (type === 2 && Packet.cacheMaxCount > 0) {
-            Packet.cacheMaxCount--;
-            cached = Packet.cacheMax.popFront();
-        }
-
-        if (cached) {
-            cached.pos = 0;
-            return cached;
-        }
-
-        if (type === 0) {
-            return new Packet(new Uint8Array(100));
-        } else if (type === 1) {
-            return new Packet(new Uint8Array(5000));
-        } else {
-            return new Packet(new Uint8Array(30000));
-        }
-    }
-
-    release(): void {
-        this.pos = 0;
-
-        if (this.length === 100 && Packet.cacheMinCount < 1000) {
-            Packet.cacheMin.push(this);
-            Packet.cacheMinCount++;
-        } else if (this.length === 5000 && Packet.cacheMidCount < 250) {
-            Packet.cacheMid.push(this);
-            Packet.cacheMidCount++;
-        } else if (this.length === 30000 && Packet.cacheMaxCount < 50) {
-            Packet.cacheMax.push(this);
-            Packet.cacheMaxCount++;
-        }
     }
 
     g1(): number {
@@ -187,10 +141,6 @@ export default class Packet extends Linkable2 {
     gdata(length: number, offset: number, dest: Uint8Array | Int8Array): void {
         dest.set(this.data.subarray(this.pos, this.pos + length), offset);
         this.pos += length;
-    }
-
-    p1Enc(opcode: number): void {
-        this.view.setUint8(this.pos++, (opcode + (this.random?.nextInt ?? 0)) & 0xff);
     }
 
     p1(value: number): void {
@@ -294,34 +244,6 @@ export default class Packet extends Linkable2 {
         }
 
         this.pos = pos;
-    }
-
-    gBitStart(): void {
-        this.bitPos = this.pos << 3;
-    }
-
-    gBitEnd(): void {
-        this.pos = (this.bitPos + 7) >>> 3;
-    }
-
-    gBit(n: number): number {
-        let bytePos: number = this.bitPos >>> 3;
-        let remaining: number = 8 - (this.bitPos & 7);
-        let value: number = 0;
-        this.bitPos += n;
-
-        for (; n > remaining; remaining = 8) {
-            value += (this.view.getUint8(bytePos++) & Packet.bitmask[remaining]) << (n - remaining);
-            n -= remaining;
-        }
-
-        if (n === remaining) {
-            value += this.view.getUint8(bytePos) & Packet.bitmask[remaining];
-        } else {
-            value += (this.view.getUint8(bytePos) >>> (remaining - n)) & Packet.bitmask[n];
-        }
-
-        return value;
     }
 
     rsaenc(mod: bigint, exp: bigint): void {

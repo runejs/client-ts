@@ -48,9 +48,8 @@ import JString from '#/datastruct/JString.js';
 import LinkList from '#/datastruct/LinkList.js';
 
 import { Int32Array2d, TypedArray1d, TypedArray3d, Int32Array3d, Uint8Array3d } from '#/util/Arrays.js';
-import { sleep } from '#/util/JsUtil.js';
 
-import { canvas, canvas2d } from '#/graphics/Canvas.js';
+import { canvas } from '#/graphics/Canvas.js';
 import { Colour } from '#/graphics/Colour.js';
 import Pix2D from '#/graphics/Pix2D.js';
 import Pix3D from '#/dash3d/Pix3D.js';
@@ -64,14 +63,11 @@ import PixMap from '#/graphics/PixMap.js';
 import ClientStream from '#/io/ClientStream.js';
 import { ClientProt } from '#/io/ClientProt.js';
 import Database from '#/io/Database.js';
-import Isaac from '#/io/Isaac.js';
 import Packet from '#/io/Packet.js';
 import { RuneJsCustomCol, RuneJsServerProt, ServerProt, ServerProtSizes } from '#/io/ServerProt.js';
 import Js5Loader from '#/js5/Js5Loader.js';
 import Js5Net from '#/js5/Js5Net.js';
 import TextureManager from '#/dash3d/TextureManager.js';
-
-import { reverseDnsLookup } from '#/util/WebDns.js';
 
 import WordFilter from '#/wordfilter/WordFilter.js';
 import WordPack from '#/wordfilter/WordPack.js';
@@ -79,7 +75,7 @@ import Huffman from '#/wordfilter/Huffman.js';
 
 import BgSound from '#/sound/BgSound.js';
 import JagFX from '#/sound/JagFX.js';
-import type Js5 from '#/js5/Js5.js';
+import PacketBit from '#/io/PacketBit.js';
 
 const CLIENT_VERSION = 435;
 
@@ -224,11 +220,10 @@ export class Client extends GameShell {
     private static loginFailCount: number = 0;
     private static loginWaitingTime: number = 0;
     private loginHopTimer: number = 0;
-    private randomIn: Isaac | null = null;
-    private out: Packet = Packet.alloc(1);
-    private loginout: Packet = Packet.alloc(1);
-    private in: Packet = Packet.alloc(1);
-    private tempP: Packet = Packet.alloc(1);
+    private out: PacketBit = new PacketBit(5000);
+    private loginout: PacketBit = new PacketBit(5000);
+    private in: PacketBit = new PacketBit(5000);
+    private tempP: Packet = new Packet(new Uint8Array(5000));
     private psize: number = 0;
     private ptype: number = 0;
     private timeoutTimer: number = 0;
@@ -2076,11 +2071,11 @@ export class Client extends GameShell {
                 this.loginout.p4(this.scripts.crc);
                 this.loginout.pdata(this.out.data, 0, this.out.pos);
 
-                this.out.random = new Isaac(seed);
+                this.out.seed(seed);
                 for (let i: number = 0; i < 4; i++) {
                     seed[i] = (seed[i] + 50) | 0;
                 }
-                this.randomIn = new Isaac(seed);
+                this.in.seed(seed);
 
                 this.stream.write(this.loginout.data, this.loginout.pos);
                 Client.loginStep = 6;
@@ -2127,9 +2122,10 @@ export class Client extends GameShell {
                     this.selfSlot = ((this.selfSlot << 8) + (await this.stream.read())) | 0;
                     this.membersAccount = await this.stream.read();
 
+                    // reading REBUILD_NORMAL first
                     this.stream.readBytes(this.in.data, 0, 1);
                     this.in.pos = 0;
-                    this.ptype = (this.in.g1() - this.randomIn!.nextInt) & 0xff;
+                    this.ptype = this.in.g1Enc();
 
                     this.stream.readBytes(this.in.data, 0, 2);
                     this.in.pos = 0;
@@ -6346,10 +6342,8 @@ export class Client extends GameShell {
 
             if (this.ptype === -1) {
                 await this.stream.readBytes(this.in.data, 0, 1);
-                this.ptype = this.in.data[0] & 0xff;
-                if (this.randomIn) {
-                    this.ptype = (this.ptype - this.randomIn.nextInt) & 0xff;
-                }
+                this.in.pos = 0;
+                this.ptype = this.in.g1Enc();
                 this.psize = ServerProtSizes[this.ptype];
                 available--;
             }
@@ -7228,14 +7222,14 @@ export class Client extends GameShell {
             }
 
             if (this.ptype === ServerProt.NPC_INFO) {
-                this.getNpcPos(this.in, this.psize);
+                this.getNpcPos();
 
                 this.ptype = -1;
                 return true;
             }
 
             if (this.ptype === ServerProt.PLAYER_INFO) {
-                this.getPlayerPos(this.in, this.psize);
+                this.getPlayerPos();
 
                 this.ptype = -1;
                 return true;
@@ -8440,14 +8434,14 @@ export class Client extends GameShell {
         this.world?.setObj(x, z, this.getAvH(x * 128 + 64, z * 128 + 64, this.minusedlevel), this.minusedlevel, typecode, topObj, middleObj, bottomObj);
     }
 
-    private getPlayerPos(buf: Packet, size: number): void {
+    private getPlayerPos(): void {
         this.entityRemovalCount = 0;
         this.entityUpdateCount = 0;
 
-        this.getPlayerPosLocal(buf, size);
-        this.getPlayerPosOldVis(buf, size);
-        this.getPlayerPosNewVis(buf, size);
-        this.getPlayerPosExtended(buf, size);
+        this.getPlayerPosLocal();
+        this.getPlayerPosOldVis();
+        this.getPlayerPosNewVis();
+        this.getPlayerPosExtended();
 
         for (let i: number = 0; i < this.entityRemovalCount; i++) {
             const index: number = this.entityRemovalIds[i];
@@ -8461,64 +8455,64 @@ export class Client extends GameShell {
             }
         }
 
-        if (buf.pos !== size) {
-            console.error(`Error packet size mismatch in getplayer pos:${buf.pos} psize:${size}`);
-            throw new Error('eek');
+        if (this.in.pos !== this.psize) {
+            console.error(`gpp1 pos:${this.in.pos} size:${this.psize}`);
+            throw new Error();
         }
 
-        for (let index: number = 0; index < this.playerCount; index++) {
-            if (!this.players[this.playerIds[index]]) {
-                console.error(`${TitleScreen.loginUser} null entry in pl list - pos:${index} size:${this.playerCount}`);
-                throw new Error('eek');
+        for (let i: number = 0; i < this.playerCount; i++) {
+            if (!this.players[this.playerIds[i]]) {
+                console.error(`gpp2 pos:${i} size:${this.playerCount}`);
+                throw new Error();
             }
         }
     }
 
-    private getPlayerPosLocal(buf: Packet, _size: number): void {
-        buf.gBitStart();
+    private getPlayerPosLocal(): void {
+        this.in.gBitStart();
 
-        const info: number = buf.gBit(1);
+        const info: number = this.in.gBit(1);
         if (info !== 0) {
-            const op: number = buf.gBit(2);
+            const op: number = this.in.gBit(2);
 
             if (op === 0) {
                 this.entityUpdateIds[this.entityUpdateCount++] = LOCAL_PLAYER_INDEX;
             } else if (op === 1) {
-                const walkDir: number = buf.gBit(3);
+                const walkDir: number = this.in.gBit(3);
                 this.localPlayer?.moveCode(walkDir, false);
 
-                const extendedInfo: number = buf.gBit(1);
+                const extendedInfo: number = this.in.gBit(1);
                 if (extendedInfo === 1) {
                     this.entityUpdateIds[this.entityUpdateCount++] = LOCAL_PLAYER_INDEX;
                 }
             } else if (op === 2) {
-                const walkDir: number = buf.gBit(3);
+                const walkDir: number = this.in.gBit(3);
                 this.localPlayer?.moveCode(walkDir, true);
 
-                const runDir: number = buf.gBit(3);
+                const runDir: number = this.in.gBit(3);
                 this.localPlayer?.moveCode(runDir, true);
 
-                const extendedInfo: number = buf.gBit(1);
+                const extendedInfo: number = this.in.gBit(1);
                 if (extendedInfo === 1) {
                     this.entityUpdateIds[this.entityUpdateCount++] = LOCAL_PLAYER_INDEX;
                 }
             } else if (op === 3) {
-                const jump: number = buf.gBit(1);
-                this.minusedlevel = buf.gBit(2);
-                const extendedInfo: number = buf.gBit(1);
+                const jump: number = this.in.gBit(1);
+                this.minusedlevel = this.in.gBit(2);
+                const extendedInfo: number = this.in.gBit(1);
                 if (extendedInfo === 1) {
                     this.entityUpdateIds[this.entityUpdateCount++] = LOCAL_PLAYER_INDEX;
                 }
-                const localX: number = buf.gBit(7);
-                const localZ: number = buf.gBit(7);
+                const localX: number = this.in.gBit(7);
+                const localZ: number = this.in.gBit(7);
 
                 this.localPlayer?.teleport(localZ, jump === 1, localX);
             }
         }
     }
 
-    private getPlayerPosOldVis(buf: Packet, _size: number): void {
-        const count: number = buf.gBit(8);
+    private getPlayerPosOldVis(): void {
+        const count: number = this.in.gBit(8);
 
         if (count < this.playerCount) {
             for (let i: number = count; i < this.playerCount; i++) {
@@ -8527,7 +8521,7 @@ export class Client extends GameShell {
         }
 
         if (count > this.playerCount) {
-            console.error(`eek! ${TitleScreen.loginUser} Too many players`);
+            console.error('gppov1');
             throw new Error();
         }
 
@@ -8536,14 +8530,14 @@ export class Client extends GameShell {
             const index: number = this.playerIds[i];
             const player: ClientPlayer | null = this.players[index];
 
-            const info: number = buf.gBit(1);
+            const info: number = this.in.gBit(1);
             if (info === 0) {
                 this.playerIds[this.playerCount++] = index;
                 if (player) {
                     player.cycle = this.loopCycle;
                 }
             } else {
-                const op: number = buf.gBit(2);
+                const op: number = this.in.gBit(2);
 
                 if (op === 0) {
                     this.playerIds[this.playerCount++] = index;
@@ -8557,10 +8551,10 @@ export class Client extends GameShell {
                         player.cycle = this.loopCycle;
                     }
 
-                    const walkDir: number = buf.gBit(3);
+                    const walkDir: number = this.in.gBit(3);
                     player?.moveCode(walkDir, false);
 
-                    const extendedInfo: number = buf.gBit(1);
+                    const extendedInfo: number = this.in.gBit(1);
                     if (extendedInfo === 1) {
                         this.entityUpdateIds[this.entityUpdateCount++] = index;
                     }
@@ -8570,13 +8564,13 @@ export class Client extends GameShell {
                         player.cycle = this.loopCycle;
                     }
 
-                    const walkDir: number = buf.gBit(3);
+                    const walkDir: number = this.in.gBit(3);
                     player?.moveCode(walkDir, true);
 
-                    const runDir: number = buf.gBit(3);
+                    const runDir: number = this.in.gBit(3);
                     player?.moveCode(runDir, true);
 
-                    const extendedInfo: number = buf.gBit(1);
+                    const extendedInfo: number = this.in.gBit(1);
                     if (extendedInfo === 1) {
                         this.entityUpdateIds[this.entityUpdateCount++] = index;
                     }
@@ -8587,9 +8581,9 @@ export class Client extends GameShell {
         }
     }
 
-    private getPlayerPosNewVis(buf: Packet, size: number): void {
-        while (buf.bitPos + 11 <= size * 8) {
-            const index = buf.gBit(11);
+    private getPlayerPosNewVis(): void {
+        while (this.in.bitPos + 11 <= this.psize * 8) {
+            const index = this.in.gBit(11);
             if (index === 2047) {
                 break;
             }
@@ -8611,23 +8605,23 @@ export class Client extends GameShell {
                 player.cycle = this.loopCycle;
             }
 
-            let dx: number = buf.gBit(5);
+            let dx: number = this.in.gBit(5);
             if (dx > 15) {
                 dx -= 32;
             }
 
-            let dz: number = buf.gBit(5);
+            let dz: number = this.in.gBit(5);
             if (dz > 15) {
                 dz -= 32;
             }
 
-            const yaw = ANGLE_TO_DIR[buf.gBit(3)];
+            const yaw = ANGLE_TO_DIR[this.in.gBit(3)];
             if (created && player) {
                 player.yaw = yaw;
             }
 
-            const jump: number = buf.gBit(1);
-            const extendedInfo: number = buf.gBit(1);
+            const jump: number = this.in.gBit(1);
+            const extendedInfo: number = this.in.gBit(1);
 
             if (extendedInfo === 1) {
                 this.entityUpdateIds[this.entityUpdateCount++] = index;
@@ -8638,10 +8632,10 @@ export class Client extends GameShell {
             }
         }
 
-        buf.gBitEnd();
+        this.in.gBitEnd();
     }
 
-    private getPlayerPosExtended(buf: Packet, _size: number): void {
+    private getPlayerPosExtended(): void {
         for (let i: number = 0; i < this.entityUpdateCount; i++) {
             const index: number = this.entityUpdateIds[i];
             const player: ClientPlayer | null = this.players[index];
@@ -8649,77 +8643,77 @@ export class Client extends GameShell {
                 continue;
             }
 
-            let mask: number = buf.g1();
+            let mask: number = this.in.g1();
             if ((mask & PlayerUpdate.BIG_UPDATE) !== 0) {
-                mask += buf.g1() << 8;
+                mask += this.in.g1() << 8;
             }
 
-            this.getPlayerPosDecodeExtended(player, index, mask, buf);
+            this.getPlayerPosDecodeExtended(player, index, mask);
         }
     }
 
-    private getPlayerPosDecodeExtended(player: ClientPlayer, index: number, mask: number, buf: Packet): void {
+    private getPlayerPosDecodeExtended(player: ClientPlayer, index: number, mask: number): void {
         if ((mask & PlayerUpdate.HITMARK) !== 0) {
-            const damage = buf.g1_alt3();
-            const damageType = buf.g1_alt1();
+            const damage = this.in.g1_alt3();
+            const damageType = this.in.g1_alt1();
 
             player.addHitmark(damageType, this.loopCycle, damage);
             player.combatCycle = this.loopCycle + 300;
-            player.health = buf.g1_alt3();
-            player.totalHealth = buf.g1_alt1();
+            player.health = this.in.g1_alt3();
+            player.totalHealth = this.in.g1_alt1();
         }
 
         if ((mask & PlayerUpdate.FACESQUARE) !== 0) {
-            player.faceSquareX = buf.g2();
-            player.faceSquareZ = buf.g2_alt1();
+            player.faceSquareX = this.in.g2();
+            player.faceSquareZ = this.in.g2_alt1();
         }
 
         if ((mask & PlayerUpdate.ANIM) !== 0) {
-            let seqId: number = buf.g2_alt1();
+            let seqId: number = this.in.g2_alt1();
             if (seqId === 65535) {
                 seqId = -1;
             }
 
-            const delay: number = buf.g1_alt2();
+            const delay: number = this.in.g1_alt2();
             this.triggerPlayerAnim(seqId, delay, player);
         }
 
         if ((mask & PlayerUpdate.FACEENTITY) !== 0) {
-            player.faceEntity = buf.g2_alt2();
+            player.faceEntity = this.in.g2_alt2();
             if (player.faceEntity === 65535) {
                 player.faceEntity = -1;
             }
         }
 
         if ((mask & PlayerUpdate.HITMARK2) !== 0) {
-            const damage = buf.g1();
-            const damageType = buf.g1_alt1();
+            const damage = this.in.g1();
+            const damageType = this.in.g1_alt1();
 
             player.addHitmark(damageType, this.loopCycle, damage);
             player.combatCycle = this.loopCycle + 300;
-            player.health = buf.g1_alt1();
-            player.totalHealth = buf.g1_alt1();
+            player.health = this.in.g1_alt1();
+            player.totalHealth = this.in.g1_alt1();
         }
 
         if ((mask & PlayerUpdate.EXACTMOVE) !== 0) {
-            player.exactStartX = buf.g1_alt3();
-            player.exactStartZ = buf.g1_alt3();
-            player.exactEndX = buf.g1();
-            player.exactEndZ = buf.g1();
-            player.exactMoveEnd = buf.g2_alt2() + this.loopCycle;
-            player.exactMoveStart = buf.g2_alt3() + this.loopCycle;
-            player.exactMoveFacing = buf.g1_alt1();
+            player.exactStartX = this.in.g1_alt3();
+            player.exactStartZ = this.in.g1_alt3();
+            player.exactEndX = this.in.g1();
+            player.exactEndZ = this.in.g1();
+            player.exactMoveEnd = this.in.g2_alt2() + this.loopCycle;
+            player.exactMoveStart = this.in.g2_alt3() + this.loopCycle;
+            player.exactMoveFacing = this.in.g1_alt1();
 
             player.abortRoute();
         }
 
         if ((mask & PlayerUpdate.CHAT) !== 0) {
-            const colourEffect: number = buf.g2();
-            const type: number = RuneJsServerProt ? buf.g1() : buf.g1_alt1();
-            const length: number = RuneJsServerProt ? buf.g1() : buf.g1_alt2();
-            const start: number = buf.pos;
+            const colourEffect: number = this.in.g2();
+            const type: number = RuneJsServerProt ? this.in.g1() : this.in.g1_alt1();
+            const length: number = RuneJsServerProt ? this.in.g1() : this.in.g1_alt2();
+            const start: number = this.in.pos;
 
-            if (player.name && player.isReady()) {
+            if (player.name !== null && player.model !== null) {
                 const username: bigint = JString.toUserhash(player.name);
                 let ignored: boolean = false;
 
@@ -8733,53 +8727,48 @@ export class Client extends GameShell {
                 }
 
                 if (!ignored && this.chatDisabled === 0) {
-                    try {
-                        let uncompressed: string;
-                        if (RuneJsServerProt) {
-                            uncompressed = WordPack.unpack(buf);
-                        } else {
-                            this.tempP.pos = 0;
-                            buf.gdata_alt2(this.tempP.data, 0, length);
-                            this.tempP.pos = 0;
-                            uncompressed = WordPack.unpack(this.tempP);
-                        }
+                    this.tempP.pos = 0;
+                    if (RuneJsServerProt) {
+                        this.in.gdata(length, 0, this.tempP.data);
+                    } else {
+                        this.in.gdata_alt2(this.tempP.data, 0, length);
+                    }
+                    this.tempP.pos = 0;
 
-                        const message: string = JString.toSentenceCase(uncompressed).trim();
-                        player.chatMessage = message;
-                        player.chatColour = colourEffect >> 8;
-                        player.chatEffect = colourEffect & 0xff;
-                        player.chatTimer = 150;
+                    const uncompressed = WordPack.unpack(this.tempP);
+                    const message: string = JString.toSentenceCase(uncompressed).trim();
+                    player.chatMessage = message;
+                    player.chatColour = colourEffect >> 8;
+                    player.chatEffect = colourEffect & 0xff;
+                    player.chatTimer = 150;
 
-                        if (type === 2 || type === 3) {
-                            this.addChat(1, message, '@cr2@' + player.name);
-                        } else if (type === 1) {
-                            this.addChat(1, message, '@cr1@' + player.name);
-                        } else {
-                            this.addChat(2, message, player.name);
-                        }
-                    } catch (_e) {
-                        // signlink.reporterror('cde2');
+                    if (type === 2 || type === 3) {
+                        this.addChat(1, message, '@cr2@' + player.name);
+                    } else if (type === 1) {
+                        this.addChat(1, message, '@cr1@' + player.name);
+                    } else {
+                        this.addChat(2, message, player.name);
                     }
                 }
             }
 
-            buf.pos = start + length;
+            this.in.pos = start + length;
         }
 
         if ((mask & PlayerUpdate.APPEARANCE) !== 0) {
-            const length: number = buf.g1();
+            const length: number = this.in.g1();
 
             const data: Uint8Array = new Uint8Array(length);
             const appearance: Packet = new Packet(data);
-            buf.gdata(length, 0, data);
+            this.in.gdata(length, 0, data);
 
             this.playerAppearanceBuffer[index] = appearance;
             player.setAppearance(appearance);
         }
 
         if ((mask & PlayerUpdate.SPOTANIM) !== 0) {
-            player.spotanimId = buf.g2_alt1();
-            const heightDelay: number = buf.g4_alt3();
+            player.spotanimId = this.in.g2_alt1();
+            const heightDelay: number = this.in.g4_alt3();
 
             player.spotanimFrame = 0;
             player.spotanimCycle = 0;
@@ -8796,7 +8785,7 @@ export class Client extends GameShell {
         }
 
         if ((mask & PlayerUpdate.SAY) !== 0) {
-            player.chatMessage = buf.gjstr();
+            player.chatMessage = this.in.gjstr();
 
             if (player.chatMessage.charAt(0) === '~') {
                 player.chatMessage = player.chatMessage.substring(1);
@@ -8837,13 +8826,13 @@ export class Client extends GameShell {
         }
     }
 
-    private getNpcPos(buf: Packet, size: number): void {
+    private getNpcPos(): void {
         this.entityRemovalCount = 0;
         this.entityUpdateCount = 0;
 
-        this.getNpcPosOldVis(buf, size);
-        this.getNpcPosNewVis(buf, size);
-        this.getNpcPosExtended(buf, size);
+        this.getNpcPosOldVis();
+        this.getNpcPosNewVis();
+        this.getNpcPosExtended();
 
         for (let i: number = 0; i < this.entityRemovalCount; i++) {
             const index: number = this.entityRemovalIds[i];
@@ -8858,23 +8847,23 @@ export class Client extends GameShell {
             }
         }
 
-        if (buf.pos !== size) {
-            console.error(`eek! ${TitleScreen.loginUser} size mismatch in getnpcpos - pos:${buf.pos} psize:${size}`);
-            throw new Error('eek');
+        if (this.in.pos !== this.psize) {
+            console.error(`gnp1 pos:${this.in.pos} size:${this.psize}`);
+            throw new Error();
         }
 
         for (let i: number = 0; i < this.npcCount; i++) {
             if (!this.npc[this.npcIds[i]]) {
-                console.error(`eek! ${TitleScreen.loginUser} null entry in npc list - pos:${i} size:${this.npcCount}`);
-                throw new Error('eek');
+                console.error(`gnp1 pos:${i} size:${this.npcCount}`);
+                throw new Error();
             }
         }
     }
 
-    private getNpcPosOldVis(buf: Packet, size: number): void {
-        buf.gBitStart();
+    private getNpcPosOldVis(): void {
+        this.in.gBitStart();
 
-        const count: number = buf.gBit(8);
+        const count: number = this.in.gBit(8);
         if (count < this.npcCount) {
             for (let i: number = count; i < this.npcCount; i++) {
                 this.entityRemovalIds[this.entityRemovalCount++] = this.npcIds[i];
@@ -8882,8 +8871,8 @@ export class Client extends GameShell {
         }
 
         if (count > this.npcCount) {
-            console.error(`eek! ${TitleScreen.loginUser} Too many npcs`);
-            throw new Error('eek');
+            console.error('gnpov1');
+            throw new Error();
         }
 
         this.npcCount = 0;
@@ -8891,14 +8880,14 @@ export class Client extends GameShell {
             const index: number = this.npcIds[i];
             const npc: ClientNpc | null = this.npc[index];
 
-            const info: number = buf.gBit(1);
+            const info: number = this.in.gBit(1);
             if (info === 0) {
                 this.npcIds[this.npcCount++] = index;
                 if (npc) {
                     npc.cycle = this.loopCycle;
                 }
             } else {
-                const op: number = buf.gBit(2);
+                const op: number = this.in.gBit(2);
 
                 if (op === 0) {
                     this.npcIds[this.npcCount++] = index;
@@ -8912,10 +8901,10 @@ export class Client extends GameShell {
                         npc.cycle = this.loopCycle;
                     }
 
-                    const walkDir: number = buf.gBit(3);
+                    const walkDir: number = this.in.gBit(3);
                     npc?.moveCode(walkDir, false);
 
-                    const extendedInfo: number = buf.gBit(1);
+                    const extendedInfo: number = this.in.gBit(1);
                     if (extendedInfo === 1) {
                         this.entityUpdateIds[this.entityUpdateCount++] = index;
                     }
@@ -8925,13 +8914,13 @@ export class Client extends GameShell {
                         npc.cycle = this.loopCycle;
                     }
 
-                    const walkDir: number = buf.gBit(3);
+                    const walkDir: number = this.in.gBit(3);
                     npc?.moveCode(walkDir, true);
 
-                    const runDir: number = buf.gBit(3);
+                    const runDir: number = this.in.gBit(3);
                     npc?.moveCode(runDir, true);
 
-                    const extendedInfo: number = buf.gBit(1);
+                    const extendedInfo: number = this.in.gBit(1);
                     if (extendedInfo === 1) {
                         this.entityUpdateIds[this.entityUpdateCount++] = index;
                     }
@@ -8942,9 +8931,9 @@ export class Client extends GameShell {
         }
     }
 
-    private getNpcPosNewVis(buf: Packet, size: number): void {
-        while (buf.bitPos + 27 <= size * 8) {
-            const index: number = buf.gBit(15);
+    private getNpcPosNewVis(): void {
+        while (this.in.bitPos + 27 <= this.psize * 8) {
+            const index: number = this.in.gBit(15);
             if (index === 32767) {
                 break;
             }
@@ -8962,30 +8951,30 @@ export class Client extends GameShell {
                 npc.cycle = this.loopCycle;
             }
 
-            const yaw = ANGLE_TO_DIR[buf.gBit(3)];
+            const yaw = ANGLE_TO_DIR[this.in.gBit(3)];
             if (created && npc) {
                 npc.yaw = yaw;
             }
 
-            let dx: number = buf.gBit(5);
+            let dx: number = this.in.gBit(5);
             if (dx > 15) {
                 dx -= 32;
             }
 
-            let dz: number = buf.gBit(5);
+            let dz: number = this.in.gBit(5);
             if (dz > 15) {
                 dz -= 32;
             }
 
-            const extendedInfo: number = buf.gBit(1);
+            const extendedInfo: number = this.in.gBit(1);
             if (extendedInfo === 1) {
                 this.entityUpdateIds[this.entityUpdateCount++] = index;
             }
 
-            const jump = buf.gBit(1);
+            const jump = this.in.gBit(1);
 
             if (npc) {
-                npc.type = NpcType.list(buf.gBit(13));
+                npc.type = NpcType.list(this.in.gBit(13));
                 npc.size = npc.type.size;
                 npc.turnspeed = npc.type.turnspeed;
                 npc.walkanim = npc.type.walkanim;
@@ -8999,7 +8988,7 @@ export class Client extends GameShell {
                     npc.yaw = 0;
                 }
             } else {
-                buf.gBit(13);
+                this.in.gBit(13);
             }
 
             if (this.localPlayer) {
@@ -9007,10 +8996,10 @@ export class Client extends GameShell {
             }
         }
 
-        buf.gBitEnd();
+        this.in.gBitEnd();
     }
 
-    private getNpcPosExtended(buf: Packet, _size: number): void {
+    private getNpcPosExtended(): void {
         for (let i: number = 0; i < this.entityUpdateCount; i++) {
             const id: number = this.entityUpdateIds[i];
             const npc: ClientNpc | null = this.npc[id];
@@ -9018,21 +9007,21 @@ export class Client extends GameShell {
                 continue;
             }
 
-            const mask: number = buf.g1();
+            const mask: number = this.in.g1();
 
             if ((mask & NpcUpdate.HITMARK) !== 0) {
-                const damage = buf.g1_alt1();
-                const damageType = buf.g1_alt3();
+                const damage = this.in.g1_alt1();
+                const damageType = this.in.g1_alt3();
 
                 npc.addHitmark(damageType, this.loopCycle, damage);
                 npc.combatCycle = this.loopCycle + 300;
-                npc.health = buf.g1_alt1();
-                npc.totalHealth = buf.g1();
+                npc.health = this.in.g1_alt1();
+                npc.totalHealth = this.in.g1();
             }
 
             if ((mask & NpcUpdate.SPOTANIM) !== 0) {
-                npc.spotanimId = buf.g2_alt3();
-                const info: number = buf.g4();
+                npc.spotanimId = this.in.g2_alt3();
+                const info: number = this.in.g4();
 
                 npc.spotanimCycle = 0;
                 npc.spotanimLastCycle = this.loopCycle + (info & 0xffff);
@@ -9049,29 +9038,29 @@ export class Client extends GameShell {
             }
 
             if ((mask & NpcUpdate.FACEENTITY) !== 0) {
-                npc.faceEntity = buf.g2_alt2();
+                npc.faceEntity = this.in.g2_alt2();
                 if (npc.faceEntity === 65535) {
                     npc.faceEntity = -1;
                 }
             }
 
             if ((mask & NpcUpdate.HITMARK2) !== 0) {
-                const damage = buf.g1_alt1();
-                const damageType = buf.g1();
+                const damage = this.in.g1_alt1();
+                const damageType = this.in.g1();
 
                 npc.addHitmark(damageType, this.loopCycle, damage);
                 npc.combatCycle = this.loopCycle + 300;
-                npc.health = buf.g1_alt3();
-                npc.totalHealth = buf.g1_alt3();
+                npc.health = this.in.g1_alt3();
+                npc.totalHealth = this.in.g1_alt3();
             }
 
             if ((mask & NpcUpdate.SAY) !== 0) {
-                npc.chatMessage = buf.gjstr();
+                npc.chatMessage = this.in.gjstr();
                 npc.chatTimer = 100;
             }
 
             if ((mask & NpcUpdate.CHANGETYPE) !== 0) {
-                npc.type = NpcType.list(buf.g2_alt2());
+                npc.type = NpcType.list(this.in.g2_alt2());
                 npc.turnrightanim = npc.type.turnrightanim;
                 npc.turnspeed = npc.type.turnspeed;
                 npc.walkanim_r = npc.type.walkanim_r;
@@ -9084,17 +9073,17 @@ export class Client extends GameShell {
             }
 
             if ((mask & NpcUpdate.FACESQUARE) !== 0) {
-                npc.faceSquareX = buf.g2_alt2();
-                npc.faceSquareZ = buf.g2_alt1();
+                npc.faceSquareX = this.in.g2_alt2();
+                npc.faceSquareZ = this.in.g2_alt1();
             }
 
             if ((mask & NpcUpdate.ANIM) !== 0) {
-                let anim: number = buf.g2_alt2();
+                let anim: number = this.in.g2_alt2();
                 if (anim === 65535) {
                     anim = -1;
                 }
 
-                const delay: number = buf.g1_alt2();
+                const delay: number = this.in.g1_alt2();
                 if (npc.primaryAnim === anim && anim !== -1) {
                     const restartMode = SeqType.list(anim).duplicatebehaviour;
 

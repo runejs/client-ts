@@ -458,8 +458,7 @@ export default class IfType {
             this.layerId = -1;
         }
         this.hide = data.g1() === 1;
-        const hasHook = data.g1() === 1;
-        this.hashook = hasHook;
+        this.hashook = data.g1() === 1;
 
         if (this.type === ComponentType.TYPE_LAYER) {
             this.scrollPosX = data.g2();
@@ -504,7 +503,7 @@ export default class IfType {
             this.colour = data.g4();
         }
 
-        if (hasHook) {
+        if (this.hashook) {
             this.field2483 = IfType.decodeHook(data);
             this.field2487 = IfType.decodeHook(data);
             this.field2450 = IfType.decodeHook(data);
