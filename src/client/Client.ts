@@ -9302,7 +9302,7 @@ export class Client extends GameShell {
             width = this.b12.stringWid('Choose Option');
             let maxWidth: number;
             for (let i: number = 0; i < this.menuNumEntries; i++) {
-                maxWidth = this.b12.stringWid(this.menuOption[i]);
+                maxWidth = this.b12.stringWidTag(this.menuOption[i]);
                 if (maxWidth > width) {
                     width = maxWidth;
                 }
