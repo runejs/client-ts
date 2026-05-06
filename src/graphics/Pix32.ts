@@ -2,10 +2,6 @@ import Pix2D from '#/graphics/Pix2D.js';
 import { decodeJpeg } from '#/graphics/Jpeg.js';
 import Pix8 from '#/graphics/Pix8.js';
 
-interface ArchiveReader {
-    read(name: string): Uint8Array | null;
-}
-
 export default class Pix32 extends Pix2D {
     data: Int32Array;
     wi: number; // width
@@ -24,16 +20,7 @@ export default class Pix32 extends Pix2D {
         this.xof = this.yof = 0;
     }
 
-    static async fromJpeg(archive: ArchiveReader, name: string): Promise<Pix32> {
-        const dat: Uint8Array | null = archive.read(name);
-        if (!dat) {
-            throw new Error();
-        }
-
-        return this.fromBytes(dat);
-    }
-
-    static async fromBytes(dat: Uint8Array): Promise<Pix32> {
+    static async fromJpeg(dat: Uint8Array): Promise<Pix32> {
         const jpeg: ImageData = await decodeJpeg(dat);
         const image: Pix32 = new Pix32(jpeg.width, jpeg.height);
 

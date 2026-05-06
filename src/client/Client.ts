@@ -677,7 +677,7 @@ export class Client extends GameShell {
             GameShell.drawArea = null;
             Client.unloadFrame();
             if (Client.binary && Client.sprites) {
-                void TitleScreen.openFromJs5(Client.binary, Client.sprites, canvas.width);
+                TitleScreen.init(Client.binary, Client.sprites, canvas.width);
             }
         }
 
@@ -724,7 +724,7 @@ export class Client extends GameShell {
 
         this.midiSong = songId;
         this.midiFading = fading;
-        void this.loadMidi(this.songs, songId, fading, ++this.midiRequestId);
+        this.loadMidi(this.songs, songId, fading, ++this.midiRequestId);
     }
 
     private requestMidiSongByName(group: string, file: string, fading: boolean): void {
@@ -739,7 +739,7 @@ export class Client extends GameShell {
 
         this.midiSong = groupId;
         this.midiFading = fading;
-        void this.loadMidi(this.songs, groupId, fading, ++this.midiRequestId, file);
+        this.loadMidi(this.songs, groupId, fading, ++this.midiRequestId, file);
     }
 
     private requestMidiJingle(jingleId: number): void {
@@ -749,7 +749,7 @@ export class Client extends GameShell {
 
         this.midiSong = jingleId;
         this.midiFading = false;
-        void this.loadMidi(this.jingles, jingleId, false, ++this.midiRequestId);
+        this.loadMidi(this.jingles, jingleId, false, ++this.midiRequestId);
     }
 
     private async loadMidi(archive: Js5Loader, group: number, fading: boolean, requestId: number, fileName: string | null = null): Promise<void> {
@@ -922,12 +922,15 @@ export class Client extends GameShell {
             } else {
                 TitleScreen.loadPos = 50;
                 TitleScreen.loadString = 'Loaded title screen';
-                await TitleScreen.openFromJs5(Client.binary, Client.sprites, this.sWid);
+                await TitleScreen.init(Client.binary, Client.sprites, this.sWid);
+
+                // todo: move to TitleScreen.init
                 if (this.midiVolume !== 0 && !Client.lowMem) {
                     this.requestMidiSongByName('scape main', '', false);
                 } else {
                     stopMidi(false);
                 }
+
                 Client.setMainState(ClientMainState.TITLE_LOADING);
                 this.loadingStep = 70;
             }

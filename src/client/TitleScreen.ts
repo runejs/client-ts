@@ -59,11 +59,6 @@ export default class TitleScreen {
         TitleScreen.loginMes1 = line1;
     }
 
-    static clearCredentials(): void {
-        TitleScreen.loginUser = '';
-        TitleScreen.loginPass = '';
-    }
-
     static readyMax(): number {
         return 5;
     }
@@ -88,218 +83,11 @@ export default class TitleScreen {
         return ready;
     }
 
-    static async openFromJs5(binary: Js5Loader, sprites: Js5Loader, canvasWidth: number): Promise<void> {
+    static async init(binary: Js5Loader, sprites: Js5Loader, canvasWidth: number): Promise<void> {
         if (TitleScreen.open) {
             return;
         }
 
-        TitleScreen.createPixmaps();
-
-        const titleJpg = binary.getFileByName('', 'title.jpg');
-        if (!titleJpg) {
-            throw new Error('title.jpg is not loaded');
-        }
-
-        await TitleScreen.loadBackground(await Pix32.fromBytes(titleJpg));
-
-        const logo = TitleScreen.requireLoaded(PixLoader.makePix32FromJs5(sprites, 'logo', ''), 'logo');
-        TitleScreen.imageTitle2?.setPixels();
-        logo.plotSprite(((canvasWidth / 2) | 0) - ((logo.wi / 2) | 0) - 128, 18);
-
-        TitleScreen.imageTitlebox = TitleScreen.requireLoaded(PixLoader.makePix8FromJs5(sprites, 'titlebox', ''), 'titlebox');
-        TitleScreen.imageTitlebutton = TitleScreen.requireLoaded(PixLoader.makePix8FromJs5(sprites, 'titlebutton', ''), 'titlebutton');
-        TitleScreen.imageRunes = TitleScreen.requireLoaded(PixLoader.makePix8ArrayFromJs5(sprites, 'runes', ''), 'runes');
-
-        TitleScreen.initFlames();
-        TitleScreen.loginPass = '';
-        TitleScreen.loginUser = '';
-        TitleScreen.loginscreen = 0;
-        GameShell.fullredraw = true;
-        TitleScreen.open = true;
-    }
-
-    static close(): void {
-        if (!TitleScreen.open) {
-            return;
-        }
-
-        TitleScreen.imageTitle0 = null;
-        TitleScreen.imageTitle1 = null;
-        TitleScreen.imageTitle2 = null;
-        TitleScreen.imageTitle3 = null;
-        TitleScreen.imageTitle4 = null;
-        TitleScreen.imageTitle5 = null;
-        TitleScreen.imageTitle6 = null;
-        TitleScreen.imageTitle7 = null;
-        TitleScreen.imageTitle8 = null;
-        TitleScreen.imageTitlebox = null;
-        TitleScreen.imageTitlebutton = null;
-        TitleScreen.imageRunes = [];
-        TitleScreen.imageFlamesLeft = null;
-        TitleScreen.imageFlamesRight = null;
-        TitleScreen.flameGradient = null;
-        TitleScreen.flameGradient0 = null;
-        TitleScreen.flameGradient1 = null;
-        TitleScreen.flameGradient2 = null;
-        TitleScreen.flameBuffer0 = null;
-        TitleScreen.flameBuffer1 = null;
-        TitleScreen.flameBuffer2 = null;
-        TitleScreen.flameBuffer3 = null;
-        TitleScreen.open = false;
-    }
-
-    static loop(): void {
-        TitleScreen.updateFlames(Client.loopCycle);
-        if (Client.state !== 10) {
-            return;
-        }
-
-        const mouseX = ClientMouseListener.mouseClickX - 202;
-        const mouseY = ClientMouseListener.mouseClickY - 171;
-        const click = ClientMouseListener.mouseClickButton;
-
-        if (TitleScreen.loginscreen === 0) {
-            if (click === 1 && mouseX >= 25 && mouseX <= 175 && mouseY >= 100 && mouseY <= 140) {
-                TitleScreen.loginSelect = 0;
-                TitleScreen.loginscreen = 3;
-            }
-
-            if (click === 1 && mouseX >= 185 && mouseX <= 335 && mouseY >= 100 && mouseY <= 140) {
-                TitleScreen.loginscreen = 2;
-                TitleScreen.loginSelect = 0;
-                TitleScreen.loginMes('', '', 'Enter your username & password.');
-                return;
-            }
-
-            return;
-        }
-
-        if (TitleScreen.loginscreen === 2) {
-            if (click === 1 && mouseY >= 75 && mouseY < 90) {
-                TitleScreen.loginSelect = 0;
-            }
-            if (click === 1 && mouseY >= 90 && mouseY < 105) {
-                TitleScreen.loginSelect = 1;
-            }
-            if (click === 1 && mouseX >= 25 && mouseX <= 175 && mouseY >= 130 && mouseY <= 170) {
-                TitleScreen.loginUser = JString.toLoginUsername(TitleScreen.loginUser);
-                TitleScreen.loginMes('', '', 'Connecting to server...');
-                Client.setMainState(20);
-                return;
-            }
-            if (click === 1 && mouseX >= 185 && mouseX <= 335 && mouseY >= 130 && mouseY <= 170) {
-                TitleScreen.clearCredentials();
-                TitleScreen.loginscreen = 0;
-            }
-
-            while (ClientKeyboardListener.pollKey()) {
-                let valid = false;
-                const ch = String.fromCharCode(ClientKeyboardListener.ch);
-                for (let i = 0; i < Client.CHARSET.length; i++) {
-                    if (ch === Client.CHARSET.charAt(i)) {
-                        valid = true;
-                        break;
-                    }
-                }
-
-                if (TitleScreen.loginSelect === 0) {
-                    if (ClientKeyboardListener.code === 85 && TitleScreen.loginUser.length > 0) {
-                        TitleScreen.loginUser = TitleScreen.loginUser.substring(0, TitleScreen.loginUser.length - 1);
-                    }
-                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
-                        TitleScreen.loginSelect = 1;
-                    }
-                    if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginUser.length < 12) {
-                        TitleScreen.loginUser += ch;
-                    }
-                } else if (TitleScreen.loginSelect === 1) {
-                    if (ClientKeyboardListener.code === 85 && TitleScreen.loginPass.length > 0) {
-                        TitleScreen.loginPass = TitleScreen.loginPass.substring(0, TitleScreen.loginPass.length - 1);
-                    }
-                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
-                        TitleScreen.loginSelect = 0;
-                    }
-                    if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginPass.length < 20) {
-                        TitleScreen.loginPass += ch;
-                    }
-                }
-            }
-
-            return;
-        }
-
-        if (TitleScreen.loginscreen === 3 && click === 1 && mouseX >= 105 && mouseX <= 255 && mouseY >= 130 && mouseY <= 170) {
-            TitleScreen.loginscreen = 0;
-        }
-    }
-
-    static draw(b12: PixFont | null, p11: PixFont | null, state: number): void {
-        TitleScreen.imageTitle4?.setPixels();
-
-        if (state === 0 || state === 5) {
-            b12?.centreString('RuneScape is loading - please wait...', 180, 54, Colour.WHITE);
-            Pix2D.drawRect(28, 62, 304, 34, 0x8c1111);
-            Pix2D.drawRect(29, 63, 302, 32, Colour.BLACK);
-            Pix2D.fillRect(30, 64, TitleScreen.loadPos * 3, 30, 0x8c1111);
-            Pix2D.fillRect(TitleScreen.loadPos * 3 + 30, 64, 300 - TitleScreen.loadPos * 3, 30, Colour.BLACK);
-            b12?.centreString(TitleScreen.loadString, 180, 85, Colour.WHITE);
-        }
-
-        if (state === 20) {
-            TitleScreen.imageTitlebox?.plotSprite(0, 0);
-            b12?.centreStringTag(TitleScreen.loginMes1, 180, 40, Colour.YELLOW, true);
-            b12?.centreStringTag(TitleScreen.loginMes2, 180, 55, Colour.YELLOW, true);
-            b12?.centreStringTag(TitleScreen.loginMes3, 180, 70, Colour.YELLOW, true);
-            b12?.drawStringTag(`Username: ${TitleScreen.loginUser}`, 90, 95, Colour.WHITE, true);
-            b12?.drawStringTag(`Password: ${JString.getRepeatedCharacter(TitleScreen.loginPass)}`, 92, 110, Colour.WHITE, true);
-        }
-
-        if (state === 10) {
-            TitleScreen.imageTitlebox?.plotSprite(0, 0);
-            if (TitleScreen.loginscreen === 0) {
-                b12?.centreStringTag('Welcome to RuneScape', 180, 80, Colour.YELLOW, true);
-                TitleScreen.imageTitlebutton?.plotSprite(27, 100);
-                b12?.drawStringMultiline('New User', 27, 100, 144, 40, Colour.WHITE, true, 1, 1, 0);
-                TitleScreen.imageTitlebutton?.plotSprite(187, 100);
-                b12?.drawStringMultiline('Existing user', 187, 100, 144, 40, Colour.WHITE, true, 1, 1, 0);
-            } else if (TitleScreen.loginscreen === 2) {
-                b12?.centreStringTag(TitleScreen.loginMes1, 180, 40, Colour.YELLOW, true);
-                b12?.centreStringTag(TitleScreen.loginMes2, 180, 55, Colour.YELLOW, true);
-                b12?.centreStringTag(TitleScreen.loginMes3, 180, 70, Colour.YELLOW, true);
-                b12?.drawStringTag(`Username: ${TitleScreen.loginUser}${Client.loopCycle % 40 < 20 && TitleScreen.loginSelect === 0 ? '@yel@|' : ''}`, 90, 95, Colour.WHITE, true);
-                b12?.drawStringTag(`Password: ${JString.getRepeatedCharacter(TitleScreen.loginPass)}${Client.loopCycle % 40 < 20 && TitleScreen.loginSelect === 1 ? '@yel@|' : ''}`, 92, 110, Colour.WHITE, true);
-                TitleScreen.imageTitlebutton?.plotSprite(27, 130);
-                b12?.centreStringTag('Login', 100, 155, Colour.WHITE, true);
-                TitleScreen.imageTitlebutton?.plotSprite(187, 130);
-                b12?.centreStringTag('Cancel', 260, 155, Colour.WHITE, true);
-            } else if (TitleScreen.loginscreen === 3) {
-                b12?.centreStringTag('Create a free account', 180, 40, Colour.YELLOW, true);
-                b12?.centreStringTag('To create a new account you need to', 180, 65, Colour.WHITE, true);
-                b12?.centreStringTag('go back to the main RuneScape webpage', 180, 80, Colour.WHITE, true);
-                b12?.centreStringTag('and choose the "create account"', 180, 95, Colour.WHITE, true);
-                b12?.centreStringTag('button near the top of that page.', 180, 110, Colour.WHITE, true);
-                TitleScreen.imageTitlebutton?.plotSprite(107, 130);
-                b12?.centreStringTag('Cancel', 180, 155, Colour.WHITE, true);
-            }
-        }
-
-        TitleScreen.drawFlames();
-        TitleScreen.imageTitle4?.draw(202, 171);
-        TitleScreen.imageTitle0?.draw(0, 0);
-        TitleScreen.imageTitle1?.draw(637, 0);
-
-        if (GameShell.fullredraw) {
-            GameShell.fullredraw = false;
-            TitleScreen.imageTitle2?.draw(128, 0);
-            TitleScreen.imageTitle3?.draw(202, 371);
-            TitleScreen.imageTitle5?.draw(0, 265);
-            TitleScreen.imageTitle6?.draw(562, 265);
-            TitleScreen.imageTitle7?.draw(128, 171);
-            TitleScreen.imageTitle8?.draw(562, 171);
-        }
-    }
-
-    private static createPixmaps(): void {
         TitleScreen.imageTitle0 = new PixMap(128, 265);
         Pix2D.cls();
         TitleScreen.imageTitle1 = new PixMap(128, 265);
@@ -318,16 +106,13 @@ export default class TitleScreen {
         Pix2D.cls();
         TitleScreen.imageTitle8 = new PixMap(75, 94);
         Pix2D.cls();
-    }
 
-    private static requireLoaded<T>(value: T | null | undefined, name: string): T {
-        if (!value) {
-            throw new Error(`${name} is not initialised`);
+        const titleJpg = binary.getFileByName('', 'title.jpg');
+        if (!titleJpg) {
+            throw new Error();
         }
-        return value;
-    }
 
-    private static async loadBackground(background: Pix32): Promise<void> {
+        const background = await Pix32.fromJpeg(titleJpg);
         TitleScreen.imageTitle0?.setPixels();
         background.quickPlotSprite(0, 0);
         TitleScreen.imageTitle1?.setPixels();
@@ -367,9 +152,15 @@ export default class TitleScreen {
         background.quickPlotSprite(254, -171);
         TitleScreen.imageTitle8?.setPixels();
         background.quickPlotSprite(-180, -171);
-    }
 
-    private static initFlames(): void {
+        const logo = TitleScreen.requireLoaded(PixLoader.makePix32FromJs5(sprites, 'logo', ''), 'logo');
+        TitleScreen.imageTitle2?.setPixels();
+        logo.plotSprite(((canvasWidth / 2) | 0) - ((logo.wi / 2) | 0) - 128, 18);
+
+        TitleScreen.imageTitlebox = TitleScreen.requireLoaded(PixLoader.makePix8FromJs5(sprites, 'titlebox', ''), 'titlebox');
+        TitleScreen.imageTitlebutton = TitleScreen.requireLoaded(PixLoader.makePix8FromJs5(sprites, 'titlebutton', ''), 'titlebutton');
+        TitleScreen.imageRunes = TitleScreen.requireLoaded(PixLoader.makePix8ArrayFromJs5(sprites, 'runes', ''), 'runes');
+
         TitleScreen.imageFlamesLeft = new Pix32(128, 265);
         TitleScreen.imageFlamesRight = new Pix32(128, 265);
 
@@ -397,9 +188,195 @@ export default class TitleScreen {
         TitleScreen.flameGradient = new Int32Array(256);
         TitleScreen.flameBuffer0 = new Int32Array(32768);
         TitleScreen.flameBuffer1 = new Int32Array(32768);
-        TitleScreen.generateFlameCoolingMap(null);
         TitleScreen.flameBuffer2 = new Int32Array(32768);
         TitleScreen.flameBuffer3 = new Int32Array(32768);
+        TitleScreen.generateFlameCoolingMap(null);
+
+        // todo: Js5Net.sendLoginLogoutPacket here
+        // todo: play scape_main here
+
+        TitleScreen.loginPass = '';
+        TitleScreen.loginUser = '';
+        TitleScreen.loginscreen = 0;
+        GameShell.fullredraw = true;
+        TitleScreen.open = true;
+    }
+
+    static close(): void {
+        if (!TitleScreen.open) {
+            return;
+        }
+
+        TitleScreen.imageTitle0 = null;
+        TitleScreen.imageTitle1 = null;
+        TitleScreen.imageTitle2 = null;
+        TitleScreen.imageTitle3 = null;
+        TitleScreen.imageTitle4 = null;
+        TitleScreen.imageTitle5 = null;
+        TitleScreen.imageTitle6 = null;
+        TitleScreen.imageTitle7 = null;
+        TitleScreen.imageTitle8 = null;
+        TitleScreen.imageTitlebox = null;
+        TitleScreen.imageTitlebutton = null;
+        TitleScreen.imageRunes = [];
+        TitleScreen.imageFlamesLeft = null;
+        TitleScreen.imageFlamesRight = null;
+        TitleScreen.flameGradient = null;
+        TitleScreen.flameGradient0 = null;
+        TitleScreen.flameGradient1 = null;
+        TitleScreen.flameGradient2 = null;
+        TitleScreen.flameBuffer0 = null;
+        TitleScreen.flameBuffer1 = null;
+        TitleScreen.flameBuffer2 = null;
+        TitleScreen.flameBuffer3 = null;
+        TitleScreen.open = false;
+    }
+
+    static loop(): void {
+        TitleScreen.updateFlames(Client.loopCycle);
+
+        if (Client.state !== 10) {
+            return;
+        }
+
+        const mouseX = ClientMouseListener.mouseClickX - 202;
+        const mouseY = ClientMouseListener.mouseClickY - 171;
+        const click = ClientMouseListener.mouseClickButton;
+
+        if (TitleScreen.loginscreen === 0) {
+            if (click === 1 && mouseX >= 25 && mouseX <= 175 && mouseY >= 100 && mouseY <= 140) {
+                TitleScreen.loginSelect = 0;
+                TitleScreen.loginscreen = 3;
+            } else if (click === 1 && mouseX >= 185 && mouseX <= 335 && mouseY >= 100 && mouseY <= 140) {
+                TitleScreen.loginscreen = 2;
+                TitleScreen.loginSelect = 0;
+                TitleScreen.loginMes1 = '';
+                TitleScreen.loginMes2 = 'Enter your username & password.';
+                TitleScreen.loginMes3 = '';
+            }
+        } else if (TitleScreen.loginscreen === 2) {
+            if (click === 1 && mouseY >= 75 && mouseY < 90) {
+                TitleScreen.loginSelect = 0;
+            } else if (click === 1 && mouseY >= 90 && mouseY < 105) {
+                TitleScreen.loginSelect = 1;
+            } else if (click === 1 && mouseX >= 25 && mouseX <= 175 && mouseY >= 130 && mouseY <= 170) {
+                TitleScreen.loginUser = JString.toLoginUsername(TitleScreen.loginUser);
+                TitleScreen.loginMes('', '', 'Connecting to server...');
+                Client.setMainState(20);
+                return;
+            } else if (click === 1 && mouseX >= 185 && mouseX <= 335 && mouseY >= 130 && mouseY <= 170) {
+                TitleScreen.loginUser = '';
+                TitleScreen.loginPass = '';
+                TitleScreen.loginscreen = 0;
+            }
+
+            while (ClientKeyboardListener.pollKey()) {
+                let valid = false;
+                const ch = String.fromCharCode(ClientKeyboardListener.ch);
+                for (let i = 0; i < Client.CHARSET.length; i++) {
+                    if (ch === Client.CHARSET.charAt(i)) {
+                        valid = true;
+                        break;
+                    }
+                }
+
+                if (TitleScreen.loginSelect === 0) {
+                    if (ClientKeyboardListener.code === 85 && TitleScreen.loginUser.length > 0) {
+                        TitleScreen.loginUser = TitleScreen.loginUser.substring(0, TitleScreen.loginUser.length - 1);
+                    }
+                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
+                        TitleScreen.loginSelect = 1;
+                    }
+                    if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginUser.length < 12) {
+                        TitleScreen.loginUser += ch;
+                    }
+                } else if (TitleScreen.loginSelect === 1) {
+                    if (ClientKeyboardListener.code === 85 && TitleScreen.loginPass.length > 0) {
+                        TitleScreen.loginPass = TitleScreen.loginPass.substring(0, TitleScreen.loginPass.length - 1);
+                    }
+                    if (ClientKeyboardListener.code === 84 || ClientKeyboardListener.code === 80) {
+                        TitleScreen.loginSelect = 0;
+                    }
+                    if (valid && ClientKeyboardListener.ch >= 0 && TitleScreen.loginPass.length < 20) {
+                        TitleScreen.loginPass += ch;
+                    }
+                }
+            }
+        } else if (TitleScreen.loginscreen === 3) {
+            if (click === 1 && mouseX >= 105 && mouseX <= 255 && mouseY >= 130 && mouseY <= 170) {
+                TitleScreen.loginscreen = 0;
+            }
+        }
+    }
+
+    static draw(b12: PixFont | null, p11: PixFont | null, state: number): void {
+        TitleScreen.imageTitle4?.setPixels();
+
+        if (state === 0 || state === 5) {
+            b12?.centreString('RuneScape is loading - please wait...', 180, 54, Colour.WHITE);
+            Pix2D.drawRect(28, 62, 304, 34, 0x8c1111);
+            Pix2D.drawRect(29, 63, 302, 32, Colour.BLACK);
+            Pix2D.fillRect(30, 64, TitleScreen.loadPos * 3, 30, 0x8c1111);
+            Pix2D.fillRect(TitleScreen.loadPos * 3 + 30, 64, 300 - TitleScreen.loadPos * 3, 30, Colour.BLACK);
+            b12?.centreString(TitleScreen.loadString, 180, 85, Colour.WHITE);
+        } else if (state === 10) {
+            TitleScreen.imageTitlebox?.plotSprite(0, 0);
+            if (TitleScreen.loginscreen === 0) {
+                b12?.centreStringTag('Welcome to RuneScape', 180, 80, Colour.YELLOW, true);
+                TitleScreen.imageTitlebutton?.plotSprite(27, 100);
+                b12?.drawStringMultiline('New User', 27, 100, 144, 40, Colour.WHITE, true, 1, 1, 0);
+                TitleScreen.imageTitlebutton?.plotSprite(187, 100);
+                b12?.drawStringMultiline('Existing user', 187, 100, 144, 40, Colour.WHITE, true, 1, 1, 0);
+            } else if (TitleScreen.loginscreen === 2) {
+                b12?.centreStringTag(TitleScreen.loginMes1, 180, 40, Colour.YELLOW, true);
+                b12?.centreStringTag(TitleScreen.loginMes2, 180, 55, Colour.YELLOW, true);
+                b12?.centreStringTag(TitleScreen.loginMes3, 180, 70, Colour.YELLOW, true);
+                b12?.drawStringTag(`Username: ${TitleScreen.loginUser}${Client.loopCycle % 40 < 20 && TitleScreen.loginSelect === 0 ? '@yel@|' : ''}`, 90, 95, Colour.WHITE, true);
+                b12?.drawStringTag(`Password: ${JString.getRepeatedCharacter(TitleScreen.loginPass)}${Client.loopCycle % 40 < 20 && TitleScreen.loginSelect === 1 ? '@yel@|' : ''}`, 92, 110, Colour.WHITE, true);
+                TitleScreen.imageTitlebutton?.plotSprite(27, 130);
+                b12?.centreStringTag('Login', 100, 155, Colour.WHITE, true);
+                TitleScreen.imageTitlebutton?.plotSprite(187, 130);
+                b12?.centreStringTag('Cancel', 260, 155, Colour.WHITE, true);
+            } else if (TitleScreen.loginscreen === 3) {
+                b12?.centreStringTag('Create a free account', 180, 40, Colour.YELLOW, true);
+                b12?.centreStringTag('To create a new account you need to', 180, 65, Colour.WHITE, true);
+                b12?.centreStringTag('go back to the main RuneScape webpage', 180, 80, Colour.WHITE, true);
+                b12?.centreStringTag('and choose the "create account"', 180, 95, Colour.WHITE, true);
+                b12?.centreStringTag('button near the top of that page.', 180, 110, Colour.WHITE, true);
+                TitleScreen.imageTitlebutton?.plotSprite(107, 130);
+                b12?.centreStringTag('Cancel', 180, 155, Colour.WHITE, true);
+            }
+        } else if (state === 20) {
+            TitleScreen.imageTitlebox?.plotSprite(0, 0);
+            b12?.centreStringTag(TitleScreen.loginMes1, 180, 40, Colour.YELLOW, true);
+            b12?.centreStringTag(TitleScreen.loginMes2, 180, 55, Colour.YELLOW, true);
+            b12?.centreStringTag(TitleScreen.loginMes3, 180, 70, Colour.YELLOW, true);
+            b12?.drawStringTag(`Username: ${TitleScreen.loginUser}`, 90, 95, Colour.WHITE, true);
+            b12?.drawStringTag(`Password: ${JString.getRepeatedCharacter(TitleScreen.loginPass)}`, 92, 110, Colour.WHITE, true);
+        }
+
+        TitleScreen.drawFlames();
+
+        TitleScreen.imageTitle4?.draw(202, 171);
+        TitleScreen.imageTitle0?.draw(0, 0);
+        TitleScreen.imageTitle1?.draw(637, 0);
+
+        if (GameShell.fullredraw) {
+            GameShell.fullredraw = false;
+            TitleScreen.imageTitle2?.draw(128, 0);
+            TitleScreen.imageTitle3?.draw(202, 371);
+            TitleScreen.imageTitle5?.draw(0, 265);
+            TitleScreen.imageTitle6?.draw(562, 265);
+            TitleScreen.imageTitle7?.draw(128, 171);
+            TitleScreen.imageTitle8?.draw(562, 171);
+        }
+    }
+
+    private static requireLoaded<T>(value: T | null | undefined, name: string): T {
+        if (!value) {
+            throw new Error(`${name} is not initialised`);
+        }
+        return value;
     }
 
     private static updateFlames(loopCycle: number): void {
