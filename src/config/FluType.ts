@@ -5,6 +5,7 @@ import type Js5 from '#/js5/Js5.js';
 
 export default class FluType extends Linkable2 {
     static recentUse: LruCache<FluType> = new LruCache(64);
+
     static configClient: Js5 | null = null;
 
     colour: number = 0;
@@ -18,7 +19,7 @@ export default class FluType extends Linkable2 {
     }
 
     static resetCache() {
-        FluType.recentUse.clear();
+        this.recentUse.clear();
     }
 
     static list(id: number): FluType {
@@ -48,9 +49,13 @@ export default class FluType extends Linkable2 {
                 return;
             }
 
-            if (code === 1) {
-                this.colour = dat.g3();
-            }
+            this.decodeInner(id, dat, code);
+        }
+    }
+
+    decodeInner(id: number, dat: Packet, code: number): void {
+        if (code === 1) {
+            this.colour = dat.g3();
         }
     }
 

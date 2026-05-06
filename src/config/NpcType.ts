@@ -12,14 +12,16 @@ import VarCache from '#/var/VarCache.js';
 
 export default class NpcType extends Linkable2 {
     static numDefinitions: number = 0;
-    static models: Js5 | null = null;
-    static configClient: Js5 | null = null;
     static recentUse: LruCache<NpcType> = new LruCache(64);
+
+    static configClient: Js5 | null = null;
+    static models: Js5 | null = null;
+
     static modelCache: LruCache<Model> = new LruCache(50);
 
     id: number = -1;
 
-    name: string | null = null;
+    name: string = 'null';
     size: number = 1;
     model: Uint16Array | null = null;
     head: Uint16Array | null = null;
@@ -64,14 +66,13 @@ export default class NpcType extends Linkable2 {
             return cached;
         }
 
+        const data = this.configClient.getFile(id, 9);
         const npc = new NpcType();
         npc.id = id;
-        const data = this.configClient.getFile(id, 9);
         if (data) {
             npc.decode(new Packet(data));
         }
         this.recentUse.put(npc, BigInt(id));
-
         return npc;
     }
 
@@ -87,95 +88,99 @@ export default class NpcType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                const count: number = dat.g1();
-                this.model = new Uint16Array(count);
+            this.decodeInner(dat, code);
+        }
+    }
 
-                for (let i: number = 0; i < count; i++) {
-                    this.model[i] = dat.g2();
-                }
-            } else if (code === 2) {
-                this.name = dat.gjstr();
-            } else if (code === 12) {
-                this.size = dat.g1();
-            } else if (code === 13) {
-                this.readyanim = dat.g2();
-            } else if (code === 14) {
-                this.walkanim = dat.g2();
-            } else if (code === 15) {
-                this.turnleftanim = dat.g2();
-            } else if (code === 16) {
-                this.turnrightanim = dat.g2();
-            } else if (code === 17) {
-                this.walkanim = dat.g2();
-                this.walkanim_b = dat.g2();
-                this.walkanim_r = dat.g2();
-                this.walkanim_l = dat.g2();
-            } else if (code >= 30 && code < 40) {
-                if (!this.op) {
-                    this.op = new TypedArray1d(5, null);
-                }
+    decodeInner(dat: Packet, code: number): void {
+        if (code === 1) {
+            const count: number = dat.g1();
+            this.model = new Uint16Array(count);
 
-                this.op[code - 30] = dat.gjstr();
-                if (this.op[code - 30]?.toLowerCase() === 'hidden') {
-                    this.op[code - 30] = null;
-                }
-            } else if (code === 40) {
-                const count: number = dat.g1();
-                this.recol_s = new Uint16Array(count);
-                this.recol_d = new Uint16Array(count);
-
-                for (let i: number = 0; i < count; i++) {
-                    this.recol_s[i] = dat.g2();
-                    this.recol_d[i] = dat.g2();
-                }
-            } else if (code === 60) {
-                const count: number = dat.g1();
-                this.head = new Uint16Array(count);
-
-                for (let i: number = 0; i < count; i++) {
-                    this.head[i] = dat.g2();
-                }
-            } else if (code === 93) {
-                this.minimap = false;
-            } else if (code === 95) {
-                this.vislevel = dat.g2();
-            } else if (code === 97) {
-                this.resizeh = dat.g2();
-            } else if (code === 98) {
-                this.resizev = dat.g2();
-            } else if (code === 99) {
-                this.alwaysontop = true;
-            } else if (code === 100) {
-                this.ambient = dat.g1b();
-            } else if (code === 101) {
-                this.contrast = dat.g1b() * 5;
-            } else if (code === 102) {
-                this.headicon = dat.g2();
-            } else if (code === 103) {
-                this.turnspeed = dat.g2();
-            } else if (code === 106) {
-                this.multivarbit = dat.g2();
-                if (this.multivarbit === 65535) {
-                    this.multivarbit = -1;
-                }
-
-                this.multivarp = dat.g2();
-                if (this.multivarp === 65535) {
-                    this.multivarp = -1;
-                }
-
-                const count = dat.g1();
-                this.multinpc = new Int32Array(count + 1);
-                for (let i = 0; i <= count; i++) {
-                    this.multinpc[i] = dat.g2();
-                    if (this.multinpc[i] === 65535) {
-                        this.multinpc[i] = -1;
-                    }
-                }
-            } else if (code === 107) {
-                this.active = false;
+            for (let i: number = 0; i < count; i++) {
+                this.model[i] = dat.g2();
             }
+        } else if (code === 2) {
+            this.name = dat.gjstr();
+        } else if (code === 12) {
+            this.size = dat.g1();
+        } else if (code === 13) {
+            this.readyanim = dat.g2();
+        } else if (code === 14) {
+            this.walkanim = dat.g2();
+        } else if (code === 15) {
+            this.turnleftanim = dat.g2();
+        } else if (code === 16) {
+            this.turnrightanim = dat.g2();
+        } else if (code === 17) {
+            this.walkanim = dat.g2();
+            this.walkanim_b = dat.g2();
+            this.walkanim_r = dat.g2();
+            this.walkanim_l = dat.g2();
+        } else if (code >= 30 && code < 40) {
+            if (!this.op) {
+                this.op = new TypedArray1d(5, null);
+            }
+
+            this.op[code - 30] = dat.gjstr();
+            if (this.op[code - 30]?.toLowerCase() === 'hidden') {
+                this.op[code - 30] = null;
+            }
+        } else if (code === 40) {
+            const count: number = dat.g1();
+            this.recol_s = new Uint16Array(count);
+            this.recol_d = new Uint16Array(count);
+
+            for (let i: number = 0; i < count; i++) {
+                this.recol_s[i] = dat.g2();
+                this.recol_d[i] = dat.g2();
+            }
+        } else if (code === 60) {
+            const count: number = dat.g1();
+            this.head = new Uint16Array(count);
+
+            for (let i: number = 0; i < count; i++) {
+                this.head[i] = dat.g2();
+            }
+        } else if (code === 93) {
+            this.minimap = false;
+        } else if (code === 95) {
+            this.vislevel = dat.g2();
+        } else if (code === 97) {
+            this.resizeh = dat.g2();
+        } else if (code === 98) {
+            this.resizev = dat.g2();
+        } else if (code === 99) {
+            this.alwaysontop = true;
+        } else if (code === 100) {
+            this.ambient = dat.g1b();
+        } else if (code === 101) {
+            this.contrast = dat.g1b() * 5;
+        } else if (code === 102) {
+            this.headicon = dat.g2();
+        } else if (code === 103) {
+            this.turnspeed = dat.g2();
+        } else if (code === 106) {
+            this.multivarbit = dat.g2();
+            if (this.multivarbit === 65535) {
+                this.multivarbit = -1;
+            }
+
+            this.multivarp = dat.g2();
+            if (this.multivarp === 65535) {
+                this.multivarp = -1;
+            }
+
+            const count = dat.g1();
+            this.multinpc = new Int32Array(count + 1);
+            for (let i = 0; i <= count; i++) {
+                this.multinpc[i] = dat.g2();
+                if (this.multinpc[i] === 65535) {
+                    this.multinpc[i] = -1;
+                }
+            }
+        } else if (code === 107) {
+            this.active = false;
         }
     }
 

@@ -6,6 +6,7 @@ import type Js5 from '#/js5/Js5.js';
 export default class VarpType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<VarpType> = new LruCache(64);
+
     static configClient: Js5 | null = null;
 
     clientcode: number = 0;
@@ -25,8 +26,8 @@ export default class VarpType extends Linkable2 {
             return cached;
         }
 
-        const varp = new VarpType();
         const data = this.configClient.getFile(id, 16);
+        const varp = new VarpType();
         if (data) {
             varp.decode(new Packet(data));
         }
@@ -45,9 +46,13 @@ export default class VarpType extends Linkable2 {
                 break;
             }
 
-            if (code === 5) {
-                this.clientcode = dat.g2();
-            }
+            this.decodeInner(dat, code);
+        }
+    }
+
+    decodeInner(dat: Packet, code: number): void {
+        if (code === 5) {
+            this.clientcode = dat.g2();
         }
     }
 }

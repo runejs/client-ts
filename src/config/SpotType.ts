@@ -11,8 +11,10 @@ import type Js5 from '#/js5/Js5.js';
 export default class SpotType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<SpotType> = new LruCache(64);
-    static models: Js5 | null = null;
+
     static configClient: Js5 | null = null;
+    static models: Js5 | null = null;
+
     static modelCache: LruCache<Model> = new LruCache(30);
 
     id: number = 0;
@@ -43,9 +45,9 @@ export default class SpotType extends Linkable2 {
             return cached;
         }
 
+        const data = this.configClient.getFile(id, 13);
         const spot = new SpotType();
         spot.id = id;
-        const data = this.configClient.getFile(id, 13);
         if (data) {
             spot.decode(new Packet(data));
         }
@@ -65,25 +67,29 @@ export default class SpotType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.model = dat.g2();
-            } else if (code === 2) {
-                this.anim = dat.g2();
-            } else if (code === 4) {
-                this.resizeh = dat.g2();
-            } else if (code === 5) {
-                this.resizev = dat.g2();
-            } else if (code === 6) {
-                this.angle = dat.g2();
-            } else if (code === 7) {
-                this.ambient = dat.g1();
-            } else if (code === 8) {
-                this.contrast = dat.g1();
-            } else if (code >= 40 && code < 50) {
-                this.recol_s[code - 40] = dat.g2();
-            } else if (code >= 50 && code < 60) {
-                this.recol_d[code - 50] = dat.g2();
-            }
+            this.decodeInner(dat, code);
+        }
+    }
+
+    decodeInner(dat: Packet, code: number): void {
+        if (code === 1) {
+            this.model = dat.g2();
+        } else if (code === 2) {
+            this.anim = dat.g2();
+        } else if (code === 4) {
+            this.resizeh = dat.g2();
+        } else if (code === 5) {
+            this.resizev = dat.g2();
+        } else if (code === 6) {
+            this.angle = dat.g2();
+        } else if (code === 7) {
+            this.ambient = dat.g1();
+        } else if (code === 8) {
+            this.contrast = dat.g1();
+        } else if (code >= 40 && code < 50) {
+            this.recol_s[code - 40] = dat.g2();
+        } else if (code >= 50 && code < 60) {
+            this.recol_d[code - 50] = dat.g2();
         }
     }
 

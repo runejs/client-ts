@@ -16,19 +16,21 @@ import type Js5 from '#/js5/Js5.js';
 export default class LocType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<LocType> = new LruCache(64);
+
+    static configClient: Js5 | null = null;
+    static models: Js5 | null = null;
+
+    static lowMem: boolean = false;
+    static temp: Model[] = new Array(4);
     static mc1: LruCache<Model> = new LruCache(500);
     static mc2: LruCache<Model> = new LruCache(10);
     static mc3: LruCache<Model> = new LruCache(30);
-    static temp: Model[] = new Array(4);
-    static models: Js5 | null = null;
-    static configClient: Js5 | null = null;
-    static lowMem: boolean = false;
 
     id: number = -1;
 
     model: Int32Array | null = null;
     shape: Int32Array | null = null;
-    name: string | null = null;
+    name: string = 'null';
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     width: number = 1;
@@ -43,7 +45,7 @@ export default class LocType extends Linkable2 {
     wallwidth: number = 16;
     ambient: number = 0;
     contrast: number = 0;
-    op: (string | null)[] | null = null;
+    op: (string | null)[] = new TypedArray1d(5, null);
     mapfunction: number = -1;
     mapscene: number = -1;
     mirror: boolean = false;
@@ -85,16 +87,18 @@ export default class LocType extends Linkable2 {
             return cached;
         }
 
+        const data = this.configClient.getFile(id, 6);
         const loc = new LocType();
         loc.id = id;
-        loc.reset();
-        const data = this.configClient.getFile(id, 6);
         if (data) {
             loc.decode(new Packet(data));
         }
         loc.postDecode();
+        if (loc.breakroutefinding) {
+            loc.blockwalk = false;
+            loc.blockrange = false;
+        }
         this.recentUse.put(loc, BigInt(id));
-
         return loc;
     }
 
@@ -105,49 +109,6 @@ export default class LocType extends Linkable2 {
         this.mc3.clear();
     }
 
-    private reset(): void {
-        this.model = null;
-        this.shape = null;
-        this.name = null;
-        this.recol_s = null;
-        this.recol_d = null;
-        this.width = 1;
-        this.length = 1;
-        this.blockwalk = true;
-        this.blockrange = true;
-        this.active = -1;
-        this.hillskew = false;
-        this.sharelight = false;
-        this.occlude = false;
-        this.anim = -1;
-        this.wallwidth = 16;
-        this.ambient = 0;
-        this.contrast = 0;
-        this.op = null;
-        this.mapfunction = -1;
-        this.mapscene = -1;
-        this.mirror = false;
-        this.shadow = true;
-        this.resizex = 128;
-        this.resizey = 128;
-        this.resizez = 128;
-        this.forceapproach = 0;
-        this.offsetx = 0;
-        this.offsety = 0;
-        this.offsetz = 0;
-        this.forcedecor = false;
-        this.breakroutefinding = false;
-        this.raiseobject = -1;
-        this.multiloc = null;
-        this.multivarp = -1;
-        this.multivarbit = -1;
-        this.bgsound_sound = -1;
-        this.bgsound_range = 0;
-        this.bgsound_mindelay = 0;
-        this.bgsound_maxdelay = 0;
-        this.bgsound_random = null;
-    }
-
     private postDecode(): void {
         if (this.active === -1) {
             this.active = 0;
@@ -155,19 +116,11 @@ export default class LocType extends Linkable2 {
                 this.active = 1;
             }
 
-            if (this.op) {
-                for (let i = 0; i < this.op.length; i++) {
-                    if (this.op[i] !== null) {
-                        this.active = 1;
-                        break;
-                    }
+            for (let i = 0; i < 5; i++) {
+                if (this.op[i] !== null) {
+                    this.active = 1;
                 }
             }
-        }
-
-        if (this.breakroutefinding) {
-            this.blockwalk = false;
-            this.blockrange = false;
         }
 
         if (this.raiseobject === -1) {
@@ -182,135 +135,139 @@ export default class LocType extends Linkable2 {
                 return;
             }
 
-            if (code === 1) {
-                const count = dat.g1();
-                if (count > 0) {
-                    if (!this.model || LocType.lowMem) {
-                        this.shape = new Int32Array(count);
-                        this.model = new Int32Array(count);
-                        for (let i = 0; i < count; i++) {
-                            this.model[i] = dat.g2();
-                            this.shape[i] = dat.g1();
-                        }
-                    } else {
-                        dat.pos += count * 3;
+            this.decodeInner(dat, code);
+        }
+    }
+
+    decodeInner(dat: Packet, code: number): void {
+        if (code === 1) {
+            const count = dat.g1();
+            if (count > 0) {
+                if (!this.model || LocType.lowMem) {
+                    this.shape = new Int32Array(count);
+                    this.model = new Int32Array(count);
+                    for (let i = 0; i < count; i++) {
+                        this.model[i] = dat.g2();
+                        this.shape[i] = dat.g1();
                     }
+                } else {
+                    dat.pos += count * 3;
                 }
-            } else if (code === 2) {
-                this.name = dat.gjstr();
-            } else if (code === 5) {
-                const count = dat.g1();
-                if (count > 0) {
-                    if (!this.model || LocType.lowMem) {
-                        this.shape = null;
-                        this.model = new Int32Array(count);
-                        for (let i = 0; i < count; i++) {
-                            this.model[i] = dat.g2();
-                        }
-                    } else {
-                        dat.pos += count * 2;
+            }
+        } else if (code === 2) {
+            this.name = dat.gjstr();
+        } else if (code === 5) {
+            const count = dat.g1();
+            if (count > 0) {
+                if (!this.model || LocType.lowMem) {
+                    this.shape = null;
+                    this.model = new Int32Array(count);
+                    for (let i = 0; i < count; i++) {
+                        this.model[i] = dat.g2();
                     }
+                } else {
+                    dat.pos += count * 2;
                 }
-            } else if (code === 14) {
-                this.width = dat.g1();
-            } else if (code === 15) {
-                this.length = dat.g1();
-            } else if (code === 17) {
-                this.blockwalk = false;
-            } else if (code === 18) {
-                this.blockrange = false;
-            } else if (code === 19) {
-                this.active = dat.g1();
-            } else if (code === 21) {
-                this.hillskew = true;
-            } else if (code === 22) {
-                this.sharelight = true;
-            } else if (code === 23) {
-                this.occlude = true;
-            } else if (code === 24) {
-                this.anim = dat.g2();
-                if (this.anim === 65535) {
-                    this.anim = -1;
+            }
+        } else if (code === 14) {
+            this.width = dat.g1();
+        } else if (code === 15) {
+            this.length = dat.g1();
+        } else if (code === 17) {
+            this.blockwalk = false;
+        } else if (code === 18) {
+            this.blockrange = false;
+        } else if (code === 19) {
+            this.active = dat.g1();
+        } else if (code === 21) {
+            this.hillskew = true;
+        } else if (code === 22) {
+            this.sharelight = true;
+        } else if (code === 23) {
+            this.occlude = true;
+        } else if (code === 24) {
+            this.anim = dat.g2();
+            if (this.anim === 65535) {
+                this.anim = -1;
+            }
+        } else if (code === 28) {
+            this.wallwidth = dat.g1();
+        } else if (code === 29) {
+            this.ambient = dat.g1b();
+        } else if (code === 39) {
+            this.contrast = dat.g1b() * 5;
+        } else if (code >= 30 && code < 35) {
+            if (!this.op) {
+                this.op = new TypedArray1d(5, null);
+            }
+            this.op[code - 30] = dat.gjstr();
+            if (this.op[code - 30]?.toLowerCase() === 'hidden') {
+                this.op[code - 30] = null;
+            }
+        } else if (code === 40) {
+            const count = dat.g1();
+            this.recol_s = new Uint16Array(count);
+            this.recol_d = new Uint16Array(count);
+            for (let i = 0; i < count; i++) {
+                this.recol_s[i] = dat.g2();
+                this.recol_d[i] = dat.g2();
+            }
+        } else if (code === 60) {
+            this.mapfunction = dat.g2();
+        } else if (code === 62) {
+            this.mirror = true;
+        } else if (code === 64) {
+            this.shadow = false;
+        } else if (code === 65) {
+            this.resizex = dat.g2();
+        } else if (code === 66) {
+            this.resizey = dat.g2();
+        } else if (code === 67) {
+            this.resizez = dat.g2();
+        } else if (code === 68) {
+            this.mapscene = dat.g2();
+        } else if (code === 69) {
+            this.forceapproach = dat.g1();
+        } else if (code === 70) {
+            this.offsetx = dat.g2b();
+        } else if (code === 71) {
+            this.offsety = dat.g2b();
+        } else if (code === 72) {
+            this.offsetz = dat.g2b();
+        } else if (code === 73) {
+            this.forcedecor = true;
+        } else if (code === 74) {
+            this.breakroutefinding = true;
+        } else if (code === 75) {
+            this.raiseobject = dat.g1();
+        } else if (code === 77) {
+            this.multivarbit = dat.g2();
+            if (this.multivarbit === 65535) {
+                this.multivarbit = -1;
+            }
+            this.multivarp = dat.g2();
+            if (this.multivarp === 65535) {
+                this.multivarp = -1;
+            }
+            const count = dat.g1();
+            this.multiloc = new Int32Array(count + 1);
+            for (let i = 0; i <= count; i++) {
+                this.multiloc[i] = dat.g2();
+                if (this.multiloc[i] === 65535) {
+                    this.multiloc[i] = -1;
                 }
-            } else if (code === 28) {
-                this.wallwidth = dat.g1();
-            } else if (code === 29) {
-                this.ambient = dat.g1b();
-            } else if (code === 39) {
-                this.contrast = dat.g1b() * 5;
-            } else if (code >= 30 && code < 35) {
-                if (!this.op) {
-                    this.op = new TypedArray1d(5, null);
-                }
-                this.op[code - 30] = dat.gjstr();
-                if (this.op[code - 30]?.toLowerCase() === 'hidden') {
-                    this.op[code - 30] = null;
-                }
-            } else if (code === 40) {
-                const count = dat.g1();
-                this.recol_s = new Uint16Array(count);
-                this.recol_d = new Uint16Array(count);
-                for (let i = 0; i < count; i++) {
-                    this.recol_s[i] = dat.g2();
-                    this.recol_d[i] = dat.g2();
-                }
-            } else if (code === 60) {
-                this.mapfunction = dat.g2();
-            } else if (code === 62) {
-                this.mirror = true;
-            } else if (code === 64) {
-                this.shadow = false;
-            } else if (code === 65) {
-                this.resizex = dat.g2();
-            } else if (code === 66) {
-                this.resizey = dat.g2();
-            } else if (code === 67) {
-                this.resizez = dat.g2();
-            } else if (code === 68) {
-                this.mapscene = dat.g2();
-            } else if (code === 69) {
-                this.forceapproach = dat.g1();
-            } else if (code === 70) {
-                this.offsetx = dat.g2b();
-            } else if (code === 71) {
-                this.offsety = dat.g2b();
-            } else if (code === 72) {
-                this.offsetz = dat.g2b();
-            } else if (code === 73) {
-                this.forcedecor = true;
-            } else if (code === 74) {
-                this.breakroutefinding = true;
-            } else if (code === 75) {
-                this.raiseobject = dat.g1();
-            } else if (code === 77) {
-                this.multivarbit = dat.g2();
-                if (this.multivarbit === 65535) {
-                    this.multivarbit = -1;
-                }
-                this.multivarp = dat.g2();
-                if (this.multivarp === 65535) {
-                    this.multivarp = -1;
-                }
-                const count = dat.g1();
-                this.multiloc = new Int32Array(count + 1);
-                for (let i = 0; i <= count; i++) {
-                    this.multiloc[i] = dat.g2();
-                    if (this.multiloc[i] === 65535) {
-                        this.multiloc[i] = -1;
-                    }
-                }
-            } else if (code === 78) {
-                this.bgsound_sound = dat.g2();
-                this.bgsound_range = dat.g1();
-            } else if (code === 79) {
-                this.bgsound_mindelay = dat.g2();
-                this.bgsound_maxdelay = dat.g2();
-                this.bgsound_range = dat.g1();
-                const count = dat.g1();
-                this.bgsound_random = new Int32Array(count);
-                for (let i = 0; i < count; i++) {
-                    this.bgsound_random[i] = dat.g2();
-                }
+            }
+        } else if (code === 78) {
+            this.bgsound_sound = dat.g2();
+            this.bgsound_range = dat.g1();
+        } else if (code === 79) {
+            this.bgsound_mindelay = dat.g2();
+            this.bgsound_maxdelay = dat.g2();
+            this.bgsound_range = dat.g1();
+            const count = dat.g1();
+            this.bgsound_random = new Int32Array(count);
+            for (let i = 0; i < count; i++) {
+                this.bgsound_random[i] = dat.g2();
             }
         }
     }

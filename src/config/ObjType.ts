@@ -14,9 +14,11 @@ import { TypedArray1d } from '#/util/Arrays.js';
 
 export default class ObjType extends Linkable2 {
     static numDefinitions: number = 0;
-    static models: Js5 | null = null;
-    static configClient: Js5 | null = null;
     static recentUse: LruCache<ObjType> = new LruCache(64);
+
+    static configClient: Js5 | null = null;
+    static models: Js5 | null = null;
+
     static memServer: boolean = true;
     static modelCache: LruCache<Model> = new LruCache(50);
     static spriteCache: LruCache<Pix32> = new LruCache(100);
@@ -24,7 +26,7 @@ export default class ObjType extends Linkable2 {
     id: number = -1;
 
     model: number = 0;
-    name: string | null = null;
+    name: string = 'null';
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     zoom2d: number = 2000;
@@ -36,7 +38,7 @@ export default class ObjType extends Linkable2 {
     stackable: boolean = false;
     cost: number = 1;
     members: boolean = false;
-    op: (string | null)[] | null = new TypedArray1d(5, null);
+    op: (string | null)[] | null = [null, null, 'Take', null, null];
     iop: (string | null)[] | null = [null, null, null, null, 'Drop'];
     manwear: number = -1;
     manwear2: number = -1;
@@ -79,18 +81,15 @@ export default class ObjType extends Linkable2 {
             return cached;
         }
 
+        const data = this.configClient.getFile(id, 10);
         const obj = new ObjType();
         obj.id = id;
-        obj.reset();
-        const data = this.configClient.getFile(id, 10);
         if (data) {
             obj.decode(new Packet(data));
         }
-
         if (obj.certtemplate !== -1) {
             obj.genCert();
         }
-
         if (!this.memServer && obj.members) {
             obj.iop = null;
             obj.team = 0;
@@ -98,7 +97,6 @@ export default class ObjType extends Linkable2 {
             obj.name = 'Members object';
         }
         this.recentUse.put(obj, BigInt(id));
-
         return obj;
     }
 
@@ -122,46 +120,6 @@ export default class ObjType extends Linkable2 {
         }
     }
 
-    private reset(): void {
-        this.model = 0;
-        this.name = null;
-        this.recol_s = null;
-        this.recol_d = null;
-        this.zoom2d = 2000;
-        this.xan2d = 0;
-        this.yan2d = 0;
-        this.zan2d = 0;
-        this.xof2d = 0;
-        this.yof2d = 0;
-        this.stackable = false;
-        this.cost = 1;
-        this.members = false;
-        this.op = [null, null, 'Take', null, null];
-        this.iop = [null, null, null, null, 'Drop'];
-        this.manwear = -1;
-        this.manwear2 = -1;
-        this.manwearOffset = 0;
-        this.womanwear = -1;
-        this.womanwear2 = -1;
-        this.womanwearOffset = 0;
-        this.manwear3 = -1;
-        this.womanwear3 = -1;
-        this.manhead = -1;
-        this.manhead2 = -1;
-        this.womanhead = -1;
-        this.womanhead2 = -1;
-        this.countobj = null;
-        this.countco = null;
-        this.certlink = -1;
-        this.certtemplate = -1;
-        this.resizex = 128;
-        this.resizey = 128;
-        this.resizez = 128;
-        this.ambient = 0;
-        this.contrast = 0;
-        this.team = 0;
-    }
-
     decode(dat: Packet): void {
         while (true) {
             const code = dat.g1();
@@ -169,104 +127,108 @@ export default class ObjType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.model = dat.g2();
-            } else if (code === 2) {
-                this.name = dat.gjstr();
-            } else if (code === 4) {
-                this.zoom2d = dat.g2();
-            } else if (code === 5) {
-                this.xan2d = dat.g2();
-            } else if (code === 6) {
-                this.yan2d = dat.g2();
-            } else if (code === 7) {
-                this.xof2d = dat.g2b();
-                if (this.xof2d > 32767) {
-                    this.xof2d -= 65536;
-                }
-            } else if (code === 8) {
-                this.yof2d = dat.g2b();
-                if (this.yof2d > 32767) {
-                    this.yof2d -= 65536;
-                }
-            } else if (code === 11) {
-                this.stackable = true;
-            } else if (code === 12) {
-                this.cost = dat.g4();
-            } else if (code === 16) {
-                this.members = true;
-            } else if (code === 23) {
-                this.manwear = dat.g2();
-                this.manwearOffset = dat.g1();
-            } else if (code === 24) {
-                this.manwear2 = dat.g2();
-            } else if (code === 25) {
-                this.womanwear = dat.g2();
-                this.womanwearOffset = dat.g1();
-            } else if (code === 26) {
-                this.womanwear2 = dat.g2();
-            } else if (code >= 30 && code < 35) {
-                if (!this.op) {
-                    this.op = new TypedArray1d(5, null);
-                }
+            this.decodeInner(dat, code);
+        }
+    }
 
-                this.op[code - 30] = dat.gjstr();
-                if (this.op[code - 30]?.toLowerCase() === 'hidden') {
-                    this.op[code - 30] = null;
-                }
-            } else if (code >= 35 && code < 40) {
-                if (!this.iop) {
-                    this.iop = new TypedArray1d(5, null);
-                }
-                this.iop[code - 35] = dat.gjstr();
-            } else if (code === 40) {
-                const count: number = dat.g1();
-                this.recol_s = new Uint16Array(count);
-                this.recol_d = new Uint16Array(count);
-
-                for (let i: number = 0; i < count; i++) {
-                    this.recol_s[i] = dat.g2();
-                    this.recol_d[i] = dat.g2();
-                }
-            } else if (code === 78) {
-                this.manwear3 = dat.g2();
-            } else if (code === 79) {
-                this.womanwear3 = dat.g2();
-            } else if (code === 90) {
-                this.manhead = dat.g2();
-            } else if (code === 91) {
-                this.womanhead = dat.g2();
-            } else if (code === 92) {
-                this.manhead2 = dat.g2();
-            } else if (code === 93) {
-                this.womanhead2 = dat.g2();
-            } else if (code === 95) {
-                this.zan2d = dat.g2();
-            } else if (code === 97) {
-                this.certlink = dat.g2();
-            } else if (code === 98) {
-                this.certtemplate = dat.g2();
-            } else if (code >= 100 && code < 110) {
-                if (!this.countobj || !this.countco) {
-                    this.countobj = new Uint16Array(10);
-                    this.countco = new Uint16Array(10);
-                }
-
-                this.countobj[code - 100] = dat.g2();
-                this.countco[code - 100] = dat.g2();
-            } else if (code === 110) {
-                this.resizex = dat.g2();
-            } else if (code === 111) {
-                this.resizey = dat.g2();
-            } else if (code === 112) {
-                this.resizez = dat.g2();
-            } else if (code === 113) {
-                this.ambient = dat.g1b();
-            } else if (code === 114) {
-                this.contrast = dat.g1b() * 5;
-            } else if (code === 115) {
-                this.team = dat.g1();
+    decodeInner(dat: Packet, code: number): void {
+        if (code === 1) {
+            this.model = dat.g2();
+        } else if (code === 2) {
+            this.name = dat.gjstr();
+        } else if (code === 4) {
+            this.zoom2d = dat.g2();
+        } else if (code === 5) {
+            this.xan2d = dat.g2();
+        } else if (code === 6) {
+            this.yan2d = dat.g2();
+        } else if (code === 7) {
+            this.xof2d = dat.g2b();
+            if (this.xof2d > 32767) {
+                this.xof2d -= 65536;
             }
+        } else if (code === 8) {
+            this.yof2d = dat.g2b();
+            if (this.yof2d > 32767) {
+                this.yof2d -= 65536;
+            }
+        } else if (code === 11) {
+            this.stackable = true;
+        } else if (code === 12) {
+            this.cost = dat.g4();
+        } else if (code === 16) {
+            this.members = true;
+        } else if (code === 23) {
+            this.manwear = dat.g2();
+            this.manwearOffset = dat.g1();
+        } else if (code === 24) {
+            this.manwear2 = dat.g2();
+        } else if (code === 25) {
+            this.womanwear = dat.g2();
+            this.womanwearOffset = dat.g1();
+        } else if (code === 26) {
+            this.womanwear2 = dat.g2();
+        } else if (code >= 30 && code < 35) {
+            if (!this.op) {
+                this.op = new TypedArray1d(5, null);
+            }
+
+            this.op[code - 30] = dat.gjstr();
+            if (this.op[code - 30]?.toLowerCase() === 'hidden') {
+                this.op[code - 30] = null;
+            }
+        } else if (code >= 35 && code < 40) {
+            if (!this.iop) {
+                this.iop = new TypedArray1d(5, null);
+            }
+            this.iop[code - 35] = dat.gjstr();
+        } else if (code === 40) {
+            const count: number = dat.g1();
+            this.recol_s = new Uint16Array(count);
+            this.recol_d = new Uint16Array(count);
+
+            for (let i: number = 0; i < count; i++) {
+                this.recol_s[i] = dat.g2();
+                this.recol_d[i] = dat.g2();
+            }
+        } else if (code === 78) {
+            this.manwear3 = dat.g2();
+        } else if (code === 79) {
+            this.womanwear3 = dat.g2();
+        } else if (code === 90) {
+            this.manhead = dat.g2();
+        } else if (code === 91) {
+            this.womanhead = dat.g2();
+        } else if (code === 92) {
+            this.manhead2 = dat.g2();
+        } else if (code === 93) {
+            this.womanhead2 = dat.g2();
+        } else if (code === 95) {
+            this.zan2d = dat.g2();
+        } else if (code === 97) {
+            this.certlink = dat.g2();
+        } else if (code === 98) {
+            this.certtemplate = dat.g2();
+        } else if (code >= 100 && code < 110) {
+            if (!this.countobj || !this.countco) {
+                this.countobj = new Uint16Array(10);
+                this.countco = new Uint16Array(10);
+            }
+
+            this.countobj[code - 100] = dat.g2();
+            this.countco[code - 100] = dat.g2();
+        } else if (code === 110) {
+            this.resizex = dat.g2();
+        } else if (code === 111) {
+            this.resizey = dat.g2();
+        } else if (code === 112) {
+            this.resizez = dat.g2();
+        } else if (code === 113) {
+            this.ambient = dat.g1b();
+        } else if (code === 114) {
+            this.contrast = dat.g1b() * 5;
+        } else if (code === 115) {
+            this.team = dat.g1();
         }
     }
 
@@ -380,7 +342,7 @@ export default class ObjType extends Linkable2 {
 
     static getSprite(id: number, count: number, outlineRgb: number): Pix32 | null {
         if (outlineRgb === 0) {
-            let icon = ObjType.spriteCache.find(BigInt(id));
+            let icon = this.spriteCache.find(BigInt(id));
 
             if (icon && icon.ohi !== count && icon.ohi !== -1) {
                 icon.unlink();
@@ -515,7 +477,7 @@ export default class ObjType extends Linkable2 {
         }
 
         if (outlineRgb === 0) {
-            ObjType.spriteCache.put(icon, BigInt(id));
+            this.spriteCache.put(icon, BigInt(id));
         }
 
         Pix2D.setPixels(_data, _w, _h);

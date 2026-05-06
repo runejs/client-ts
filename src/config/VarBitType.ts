@@ -6,11 +6,13 @@ import type Js5 from '#/js5/Js5.js';
 export default class VarBitType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<VarBitType> = new LruCache(64);
+
     static configClient: Js5 | null = null;
 
     basevar: number = -1;
     startbit: number = 0;
     endbit: number = 0;
+
     static init(config: Js5): void {
         this.configClient = config;
         this.numDefinitions = config.getFileIdLimit(14);
@@ -26,8 +28,8 @@ export default class VarBitType extends Linkable2 {
             return cached;
         }
 
-        const varbit = new VarBitType();
         const data = this.configClient.getFile(id, 14);
+        const varbit = new VarBitType();
         if (data) {
             varbit.decode(new Packet(data));
         }
@@ -46,11 +48,15 @@ export default class VarBitType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.basevar = dat.g2();
-                this.startbit = dat.g1();
-                this.endbit = dat.g1();
-            }
+            this.decodeInner(dat, code);
+        }
+    }
+
+    decodeInner(dat: Packet, code: number) {
+        if (code === 1) {
+            this.basevar = dat.g2();
+            this.startbit = dat.g1();
+            this.endbit = dat.g1();
         }
     }
 }

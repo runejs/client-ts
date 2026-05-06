@@ -5,6 +5,7 @@ import type Js5 from '#/js5/Js5.js';
 
 export default class FloType extends Linkable2 {
     static recentUse: LruCache<FloType> = new LruCache(64);
+
     static configClient: Js5 | null = null;
 
     colour: number = 0;
@@ -24,7 +25,7 @@ export default class FloType extends Linkable2 {
     }
 
     static resetCache() {
-        FloType.recentUse.clear();
+        this.recentUse.clear();
     }
 
     static list(id: number): FloType {
@@ -54,15 +55,19 @@ export default class FloType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.colour = dat.g3();
-            } else if (code === 2) {
-                this.texture = dat.g1();
-            } else if (code === 5) {
-                this.occlude = false;
-            } else if (code === 7) {
-                this.mapcolour = dat.g3();
-            }
+            this.decodeInner(id, dat, code);
+        }
+    }
+
+    decodeInner(id: number, dat: Packet, code: number): void {
+        if (code === 1) {
+            this.colour = dat.g3();
+        } else if (code === 2) {
+            this.texture = dat.g1();
+        } else if (code === 5) {
+            this.occlude = false;
+        } else if (code === 7) {
+            this.mapcolour = dat.g3();
         }
     }
 
@@ -136,6 +141,5 @@ export default class FloType extends Linkable2 {
         } else if (this.lightness > 255) {
             this.lightness = 255;
         }
-
     }
 }

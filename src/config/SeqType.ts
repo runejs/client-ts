@@ -26,9 +26,11 @@ export const enum RestartMode {
 export default class SeqType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<SeqType> = new LruCache(64);
+
+    static configClient: Js5 | null = null;
     static bases: Js5 | null = null;
     static anims: Js5 | null = null;
-    static configClient: Js5 | null = null;
+
     static framesetCache: Map<number, AnimFrameSet> = new Map();
 
     numFrames: number = 0;
@@ -64,8 +66,8 @@ export default class SeqType extends Linkable2 {
             return cached;
         }
 
-        const seq = new SeqType();
         const data = this.configClient.getFile(id, 12);
+        const seq = new SeqType();
         if (data) {
             seq.decode(new Packet(data));
         }
@@ -252,56 +254,59 @@ export default class SeqType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.numFrames = dat.g1();
-                this.delay = new Int32Array(this.numFrames);
-                for (let i = 0; i < this.numFrames; i++) {
-                    this.delay[i] = dat.g2();
-                }
+            this.decodeInner(dat, code);
+        }
+    }
 
-                this.frames = new Int32Array(this.numFrames);
-                for (let i = 0; i < this.numFrames; i++) {
-                    this.frames[i] = dat.g2();
-                }
-                for (let i = 0; i < this.numFrames; i++) {
-                    this.frames[i] += dat.g2() << 16;
-                }
-            } else if (code === 2) {
-                this.loops = dat.g2();
-            } else if (code === 3) {
-                const count = dat.g1();
-                this.walkmerge = new Int32Array(count + 1);
-                for (let i = 0; i < count; i++) {
-                    this.walkmerge[i] = dat.g1();
-                }
-                this.walkmerge[count] = 9999999;
-            } else if (code === 4) {
-                this.reachforward = true;
-            } else if (code === 5) {
-                this.priority = dat.g1();
-            } else if (code === 6) {
-                this.replaceheldleft = dat.g2();
-            } else if (code === 7) {
-                this.replaceheldright = dat.g2();
-            } else if (code === 8) {
-                this.maxloops = dat.g1();
-            } else if (code === 9) {
-                this.postanim_move = dat.g1();
-            } else if (code === 10) {
-                this.preanim_move = dat.g1();
-            } else if (code === 11) {
-                this.duplicatebehaviour = dat.g1();
-            } else if (code === 12) {
-                const count = dat.g1();
-                this.iframes = new Int32Array(count);
-                for (let i = 0; i < count; i++) {
-                    this.iframes[i] = dat.g2();
-                }
-                for (let i = 0; i < count; i++) {
-                    this.iframes[i] += dat.g2() << 16;
-                }
+    decodeInner(dat: Packet, code: number) {
+        if (code === 1) {
+            this.numFrames = dat.g1();
+            this.delay = new Int32Array(this.numFrames);
+            for (let i = 0; i < this.numFrames; i++) {
+                this.delay[i] = dat.g2();
+            }
+
+            this.frames = new Int32Array(this.numFrames);
+            for (let i = 0; i < this.numFrames; i++) {
+                this.frames[i] = dat.g2();
+            }
+            for (let i = 0; i < this.numFrames; i++) {
+                this.frames[i] += dat.g2() << 16;
+            }
+        } else if (code === 2) {
+            this.loops = dat.g2();
+        } else if (code === 3) {
+            const count = dat.g1();
+            this.walkmerge = new Int32Array(count + 1);
+            for (let i = 0; i < count; i++) {
+                this.walkmerge[i] = dat.g1();
+            }
+            this.walkmerge[count] = 9999999;
+        } else if (code === 4) {
+            this.reachforward = true;
+        } else if (code === 5) {
+            this.priority = dat.g1();
+        } else if (code === 6) {
+            this.replaceheldleft = dat.g2();
+        } else if (code === 7) {
+            this.replaceheldright = dat.g2();
+        } else if (code === 8) {
+            this.maxloops = dat.g1();
+        } else if (code === 9) {
+            this.postanim_move = dat.g1();
+        } else if (code === 10) {
+            this.preanim_move = dat.g1();
+        } else if (code === 11) {
+            this.duplicatebehaviour = dat.g1();
+        } else if (code === 12) {
+            const count = dat.g1();
+            this.iframes = new Int32Array(count);
+            for (let i = 0; i < count; i++) {
+                this.iframes[i] = dat.g2();
+            }
+            for (let i = 0; i < count; i++) {
+                this.iframes[i] += dat.g2() << 16;
             }
         }
-
     }
 }

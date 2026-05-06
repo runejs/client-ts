@@ -10,8 +10,9 @@ import { TypedArray1d } from '#/util/Arrays.js';
 export default class IdkType extends Linkable2 {
     static numDefinitions: number = 0;
     static recentUse: LruCache<IdkType> = new LruCache(64);
-    static models: Js5 | null = null;
+
     static configClient: Js5 | null = null;
+    static models: Js5 | null = null;
 
     part: number = -1;
     model: Int32Array | null = null;
@@ -27,7 +28,7 @@ export default class IdkType extends Linkable2 {
     }
 
     static resetCache() {
-        IdkType.recentUse.clear();
+        this.recentUse.clear();
     }
 
     static list(id: number): IdkType {
@@ -56,24 +57,28 @@ export default class IdkType extends Linkable2 {
                 break;
             }
 
-            if (code === 1) {
-                this.part = dat.g1();
-            } else if (code === 2) {
-                const count: number = dat.g1();
-                this.model = new Int32Array(count);
+            this.decodeInner(id, dat, code);
+        }
+    }
 
-                for (let i: number = 0; i < count; i++) {
-                    this.model[i] = dat.g2();
-                }
-            } else if (code === 3) {
-                this.disable = true;
-            } else if (code >= 40 && code < 50) {
-                this.recol_s[code - 40] = dat.g2();
-            } else if (code >= 50 && code < 60) {
-                this.recol_d[code - 50] = dat.g2();
-            } else if (code >= 60 && code < 70) {
-                this.head[code - 60] = dat.g2();
+    decodeInner(id: number, dat: Packet, code: number) {
+        if (code === 1) {
+            this.part = dat.g1();
+        } else if (code === 2) {
+            const count: number = dat.g1();
+            this.model = new Int32Array(count);
+
+            for (let i: number = 0; i < count; i++) {
+                this.model[i] = dat.g2();
             }
+        } else if (code === 3) {
+            this.disable = true;
+        } else if (code >= 40 && code < 50) {
+            this.recol_s[code - 40] = dat.g2();
+        } else if (code >= 50 && code < 60) {
+            this.recol_d[code - 50] = dat.g2();
+        } else if (code >= 60 && code < 70) {
+            this.head[code - 60] = dat.g2();
         }
     }
 
