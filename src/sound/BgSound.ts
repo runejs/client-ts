@@ -15,18 +15,18 @@ export default class BgSound extends Linkable {
     static ambientEnabled: boolean = true;
 
     level: number = 0;
-    field417: number = 0;
-    field420: number = -1;
+    minZ: number = 0;
+    soundId: number = -1;
     range: number = 0;
     continuousStream: WaveStream | null = null;
-    field425: number = 0;
-    field426: number = 0;
+    maxDelay: number = 0;
+    minX: number = 0;
     random: Int32Array | null = null;
-    field430: number = 0;
+    maxX: number = 0;
     randomStream: WaveStream | null = null;
     multiloc: LocType | null = null;
-    field435: number = 0;
-    field436: number = 0;
+    minDelay: number = 0;
+    maxZ: number = 0;
     randomSoundTimer: number = 0;
 
     static reset(): void {
@@ -46,44 +46,44 @@ export default class BgSound extends Linkable {
     static addSound(z: number, level: number, angle: number, x: number, loc: LocType): void {
         const sound = new BgSound();
         sound.range = loc.bgsound_range * 128;
-        sound.field425 = loc.bgsound_maxdelay;
+        sound.maxDelay = loc.bgsound_maxdelay;
         sound.random = loc.bgsound_random;
-        sound.field435 = loc.bgsound_mindelay;
+        sound.minDelay = loc.bgsound_mindelay;
         let width = loc.width;
         let length = loc.length;
         sound.level = level;
-        sound.field417 = x * 128;
+        sound.minZ = x * 128;
         if (angle === 1 || angle === 3) {
             width = loc.length;
             length = loc.width;
         }
-        sound.field426 = z * 128;
-        sound.field430 = (z + length) * 128;
-        sound.field436 = (x + width) * 128;
-        sound.field420 = loc.bgsound_sound;
+        sound.minX = z * 128;
+        sound.maxX = (z + length) * 128;
+        sound.maxZ = (x + width) * 128;
+        sound.soundId = loc.bgsound_sound;
         if (loc.multiloc !== null) {
             sound.multiloc = loc;
             sound.recalcSound();
         }
         this.soundlist.push(sound);
         if (sound.random !== null) {
-            sound.randomSoundTimer = ((sound.field425 - sound.field435) * Math.random() + sound.field435) | 0;
+            sound.randomSoundTimer = ((sound.maxDelay - sound.minDelay) * Math.random() + sound.minDelay) | 0;
         }
     }
 
     static doMix(x: number, level: number, delta: number, z: number): void {
         for (let sound: BgSound | null = this.soundlist.head(); sound !== null; sound = this.soundlist.next()) {
-            if (sound.field420 !== -1 || sound.random !== null) {
+            if (sound.soundId !== -1 || sound.random !== null) {
                 let distance = 0;
-                if (x > sound.field436) {
-                    distance = x - sound.field436;
-                } else if (x < sound.field417) {
-                    distance = sound.field417 - x;
+                if (x > sound.maxZ) {
+                    distance = x - sound.maxZ;
+                } else if (x < sound.minZ) {
+                    distance = sound.minZ - x;
                 }
-                if (z > sound.field430) {
-                    distance += z - sound.field430;
-                } else if (z < sound.field426) {
-                    distance += sound.field426 - z;
+                if (z > sound.maxX) {
+                    distance += z - sound.maxX;
+                } else if (z < sound.minX) {
+                    distance += sound.minX - z;
                 }
 
                 if (sound.range < distance - 64 || this.ambientVolume === 0 || sound.level !== level) {
@@ -102,9 +102,9 @@ export default class BgSound extends Linkable {
                     }
                     const volume = (((sound.range - distance) * this.ambientVolume) / sound.range) | 0;
                     if (sound.continuousStream !== null) {
-                        sound.continuousStream.method582(volume);
-                    } else if (sound.field420 >= 0 && Client.soundMixer !== null && BgSound.jagFX !== null) {
-                        const var7 = JagFX.load(BgSound.jagFX, sound.field420);
+                        sound.continuousStream.setVolume(volume);
+                    } else if (sound.soundId >= 0 && Client.soundMixer !== null && BgSound.jagFX !== null) {
+                        const var7 = JagFX.load(BgSound.jagFX, sound.soundId);
                         if (var7 !== null) {
                             const var8 = var7.toWave();
                             const var9 = WaveStream.newRatePercent(var8, volume);
@@ -117,7 +117,7 @@ export default class BgSound extends Linkable {
                     }
 
                     if (sound.randomStream !== null) {
-                        sound.randomStream.method582(volume);
+                        sound.randomStream.setVolume(volume);
                         if (!sound.randomStream.isRamping()) {
                             sound.randomStream = null;
                         }
@@ -130,7 +130,7 @@ export default class BgSound extends Linkable {
                             if (var13 !== null) {
                                 var13.setLoopCount(0);
                                 Client.soundMixer.playStream(var13);
-                                sound.randomSoundTimer = sound.field435 + (((sound.field425 - sound.field435) * Math.random()) | 0);
+                                sound.randomSoundTimer = sound.minDelay + (((sound.maxDelay - sound.minDelay) * Math.random()) | 0);
                                 sound.randomStream = var13;
                             }
                         }
@@ -149,22 +149,22 @@ export default class BgSound extends Linkable {
     }
 
     recalcSound(): void {
-        const oldSound = this.field420;
+        const oldSound = this.soundId;
         const loc = this.multiloc!.getMultiLoc();
         if (loc === null) {
             this.range = 0;
-            this.field435 = 0;
-            this.field425 = 0;
+            this.minDelay = 0;
+            this.maxDelay = 0;
             this.random = null;
-            this.field420 = -1;
+            this.soundId = -1;
         } else {
             this.range = loc.bgsound_range * 128;
-            this.field435 = loc.bgsound_mindelay;
-            this.field425 = loc.bgsound_maxdelay;
-            this.field420 = loc.bgsound_sound;
+            this.minDelay = loc.bgsound_mindelay;
+            this.maxDelay = loc.bgsound_maxdelay;
+            this.soundId = loc.bgsound_sound;
             this.random = loc.bgsound_random;
         }
-        if (this.field420 !== oldSound && this.continuousStream !== null) {
+        if (this.soundId !== oldSound && this.continuousStream !== null) {
             Client.soundMixer?.stopStream(this.continuousStream);
             this.continuousStream = null;
         }

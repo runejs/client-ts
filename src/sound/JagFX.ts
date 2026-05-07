@@ -68,7 +68,7 @@ export default class JagFX {
         return start;
     }
 
-    method708(): Int8Array {
+    generateSamples(): Int8Array {
         let var1 = 0;
         for (let var2 = 0; var2 < 10; var2++) {
             if (this.tones[var2] !== null && this.tones[var2]!.length + this.tones[var2]!.start > var1) {
@@ -98,7 +98,7 @@ export default class JagFX {
     }
 
     toWave(): Wave {
-        const var1 = this.method708();
+        const var1 = this.generateSamples();
         return new Wave(22050, var1, ((this.loopBegin * 22050) / 1000) | 0, ((this.loopEnd * 22050) / 1000) | 0);
     }
 }

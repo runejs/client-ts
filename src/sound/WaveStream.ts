@@ -3,8 +3,8 @@ import PcmStream from '#/sound/PcmStream.js';
 import Wave from '#/sound/Wave.js';
 
 export default class WaveStream extends PcmStream {
-    field1530: number = 0;
-    field1531: number = 0;
+    volumeShift: number = 0;
+    volumeStep: number = 0;
     readonly loopStartPosition: number;
     volumeChangeDelta: number = 0;
     pitch: number;
@@ -15,7 +15,7 @@ export default class WaveStream extends PcmStream {
     loopReversed: boolean = false;
     position: number = 0;
 
-    method579(arg0: Int32Array | number[], arg1: number, arg2: number, arg3: number, arg4: number): number {
+    mixBackwards(arg0: Int32Array | number[], arg1: number, arg2: number, arg3: number, arg4: number): number {
         if (this.volumeChangeDelta > 0) {
             let var6 = this.volumeChangeDelta + arg1;
             if (var6 > arg3) {
@@ -23,9 +23,9 @@ export default class WaveStream extends PcmStream {
             }
             this.volumeChangeDelta += arg1;
             if (this.pitch === -256 && (this.position & 0xFF) === 0) {
-                arg1 = WaveStream.doMixBackwards1To1RampMono((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.field1530, this.field1531, var6, arg2, this);
+                arg1 = WaveStream.doMixBackwards1To1RampMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.volumeShift, this.volumeStep, var6, arg2, this);
             } else {
-                arg1 = WaveStream.method581((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.field1530, this.field1531, var6, arg2, this, this.pitch, arg4);
+                arg1 = WaveStream.mixBackwardsInterpolatedRampMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.volumeShift, this.volumeStep, var6, arg2, this, this.pitch, arg4);
             }
             this.volumeChangeDelta -= arg1;
             if (this.volumeChangeDelta !== 0) {
@@ -37,7 +37,7 @@ export default class WaveStream extends PcmStream {
             }
             this.volumeMono = this.volume;
         }
-        return this.pitch === -256 && (this.position & 0xFF) === 0 ? WaveStream.method586((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this) : WaveStream.method583((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this, this.pitch, arg4);
+        return this.pitch === -256 && (this.position & 0xFF) === 0 ? WaveStream.mixBackwards1To1Mono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this) : WaveStream.mixBackwardsInterpolatedMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this, this.pitch, arg4);
     }
 
     override doMix(arg0: Int32Array | number[], arg1: number, arg2: number): number {
@@ -45,7 +45,7 @@ export default class WaveStream extends PcmStream {
             this.pretendToMix(arg2);
             return 0;
         }
-        const var4 = this.field2168 as Wave;
+        const var4 = this.streamable as Wave;
         const var5 = this.loopStartPosition << 8;
         const var6 = this.loopEndPosition << 8;
         const var7 = var4.samples.length << 8;
@@ -59,7 +59,7 @@ export default class WaveStream extends PcmStream {
             if (this.loopCount > 0) {
                 if (this.loopReversed) {
                     if (this.pitch < 0) {
-                        var9 = this.method579(arg0, arg1, var5, var10, var4.samples[this.loopStartPosition]);
+                        var9 = this.mixBackwards(arg0, arg1, var5, var10, var4.samples[this.loopStartPosition]);
                         if (this.position >= var5) {
                             return 1;
                         }
@@ -67,13 +67,13 @@ export default class WaveStream extends PcmStream {
                         this.pitch = -this.pitch;
                         if (--this.loopCount === 0) {
                             if (this.pitch < 0) {
-                                this.method579(arg0, var9, 0, var10, 0);
+                                this.mixBackwards(arg0, var9, 0, var10, 0);
                                 if (this.position < 0) {
                                     this.position = 0;
                                     this.unlink();
                                 }
                             } else {
-                                this.method592(arg0, var9, var7, var10, 0);
+                                this.mixForwards(arg0, var9, var7, var10, 0);
                                 if (this.position >= var7) {
                                     this.position = var7 - 1;
                                     this.unlink();
@@ -83,7 +83,7 @@ export default class WaveStream extends PcmStream {
                         }
                     }
                     do {
-                        var9 = this.method592(arg0, var9, var6, var10, var4.samples[this.loopEndPosition - 1]);
+                        var9 = this.mixForwards(arg0, var9, var6, var10, var4.samples[this.loopEndPosition - 1]);
                         if (this.position < var6) {
                             return 1;
                         }
@@ -92,7 +92,7 @@ export default class WaveStream extends PcmStream {
                         if (--this.loopCount === 0) {
                             break;
                         }
-                        var9 = this.method579(arg0, var9, var5, var10, var4.samples[this.loopStartPosition]);
+                        var9 = this.mixBackwards(arg0, var9, var5, var10, var4.samples[this.loopStartPosition]);
                         if (this.position >= var5) {
                             return 1;
                         }
@@ -101,7 +101,7 @@ export default class WaveStream extends PcmStream {
                     } while (--this.loopCount !== 0);
                 } else if (this.pitch < 0) {
                     while (true) {
-                        var9 = this.method579(arg0, var9, var5, var10, var4.samples[this.loopEndPosition - 1]);
+                        var9 = this.mixBackwards(arg0, var9, var5, var10, var4.samples[this.loopEndPosition - 1]);
                         if (this.position >= var5) {
                             return 1;
                         }
@@ -116,7 +116,7 @@ export default class WaveStream extends PcmStream {
                     }
                 } else {
                     while (true) {
-                        var9 = this.method592(arg0, var9, var6, var10, var4.samples[this.loopStartPosition]);
+                        var9 = this.mixForwards(arg0, var9, var6, var10, var4.samples[this.loopStartPosition]);
                         if (this.position < var6) {
                             return 1;
                         }
@@ -132,13 +132,13 @@ export default class WaveStream extends PcmStream {
                 }
             }
             if (this.pitch < 0) {
-                this.method579(arg0, var9, 0, var10, 0);
+                this.mixBackwards(arg0, var9, 0, var10, 0);
                 if (this.position < 0) {
                     this.position = 0;
                     this.unlink();
                 }
             } else {
-                this.method592(arg0, var9, var7, var10, 0);
+                this.mixForwards(arg0, var9, var7, var10, 0);
                 if (this.position >= var7) {
                     this.position = var7 - 1;
                     this.unlink();
@@ -147,7 +147,7 @@ export default class WaveStream extends PcmStream {
             return 1;
         } else if (this.loopReversed) {
             if (this.pitch < 0) {
-                var9 = this.method579(arg0, arg1, var5, var10, var4.samples[this.loopStartPosition]);
+                var9 = this.mixBackwards(arg0, arg1, var5, var10, var4.samples[this.loopStartPosition]);
                 if (this.position >= var5) {
                     return 1;
                 }
@@ -155,13 +155,13 @@ export default class WaveStream extends PcmStream {
                 this.pitch = -this.pitch;
             }
             while (true) {
-                const var11 = this.method592(arg0, var9, var6, var10, var4.samples[this.loopEndPosition - 1]);
+                const var11 = this.mixForwards(arg0, var9, var6, var10, var4.samples[this.loopEndPosition - 1]);
                 if (this.position < var6) {
                     return 1;
                 }
                 this.position = var6 + var6 - this.position - 1;
                 this.pitch = -this.pitch;
-                var9 = this.method579(arg0, var11, var5, var10, var4.samples[this.loopStartPosition]);
+                var9 = this.mixBackwards(arg0, var11, var5, var10, var4.samples[this.loopStartPosition]);
                 if (this.position >= var5) {
                     return 1;
                 }
@@ -170,7 +170,7 @@ export default class WaveStream extends PcmStream {
             }
         } else if (this.pitch < 0) {
             while (true) {
-                var9 = this.method579(arg0, var9, var5, var10, var4.samples[this.loopEndPosition - 1]);
+                var9 = this.mixBackwards(arg0, var9, var5, var10, var4.samples[this.loopEndPosition - 1]);
                 if (this.position >= var5) {
                     return 1;
                 }
@@ -178,7 +178,7 @@ export default class WaveStream extends PcmStream {
             }
         } else {
             while (true) {
-                var9 = this.method592(arg0, var9, var6, var10, var4.samples[this.loopStartPosition]);
+                var9 = this.mixForwards(arg0, var9, var6, var10, var4.samples[this.loopStartPosition]);
                 if (this.position < var6) {
                     return 1;
                 }
@@ -187,7 +187,7 @@ export default class WaveStream extends PcmStream {
         }
     }
 
-    static method580(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: number, arg8: number, arg9: WaveStream, arg10: number, arg11: number): number {
+    static mixForwardsInterpolatedRampMono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: number, arg8: number, arg9: WaveStream, arg10: number, arg11: number): number {
         let var12: number;
         if (arg10 === 0 || (var12 = (((arg8 + arg10 - arg2 - 257) / arg10) | 0) + arg3) > arg7) {
             var12 = arg7;
@@ -214,7 +214,7 @@ export default class WaveStream extends PcmStream {
         return arg3;
     }
 
-    static method581(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: number, arg8: number, arg9: WaveStream, arg10: number, arg11: number): number {
+    static mixBackwardsInterpolatedRampMono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: number, arg8: number, arg9: WaveStream, arg10: number, arg11: number): number {
         let var12: number;
         if (arg10 === 0 || (var12 = (((arg8 + arg10 + 256 - arg2) / arg10) | 0) + arg3) > arg7) {
             var12 = arg7;
@@ -240,12 +240,12 @@ export default class WaveStream extends PcmStream {
         return arg3;
     }
 
-    method582(arg0: number): void {
+    setVolume(arg0: number): void {
         this.volumeMono = arg0;
         this.volumeChangeDelta = 0;
     }
 
-    static method583(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream, arg8: number, arg9: number): number {
+    static mixBackwardsInterpolatedMono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream, arg8: number, arg9: number): number {
         let var10: number;
         if (arg8 === 0 || (var10 = (((arg6 + arg8 + 256 - arg2) / arg8) | 0) + arg3) > arg5) {
             var10 = arg5;
@@ -302,7 +302,7 @@ export default class WaveStream extends PcmStream {
         this.loopCount = arg0;
     }
 
-    static method586(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream): number {
+    static mixBackwards1To1Mono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream): number {
         let var8 = arg2 >> 8;
         const var9 = arg6 >> 8;
         const var10 = arg4 << 8;
@@ -359,9 +359,9 @@ export default class WaveStream extends PcmStream {
         const var1 = this.volumeMono * 3;
         let var2 = (var1 >>> 31) + (var1 ^ var1 >> 31);
         if (this.loopCount === 0) {
-            var2 -= this.position * var2 / (((this.field2168 as Wave).samples.length << 8));
+            var2 -= this.position * var2 / (((this.streamable as Wave).samples.length << 8));
         } else if (this.loopCount >= 0) {
-            var2 -= this.loopStartPosition * var2 / (this.field2168 as Wave).samples.length;
+            var2 -= this.loopStartPosition * var2 / (this.streamable as Wave).samples.length;
         }
         return var2 > 255 ? 255 : var2;
     }
@@ -374,7 +374,7 @@ export default class WaveStream extends PcmStream {
         return arg0.samples === null || arg0.samples.length === 0 ? null : new WaveStream(arg0, ((arg0.samplingFrequency * 256 * 100) / (PcmPlayer.frequency * 100)) | 0, arg1);
     }
 
-    static method591(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream, arg8: number, arg9: number): number {
+    static mixForwardsInterpolatedMono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream, arg8: number, arg9: number): number {
         let var10: number;
         if (arg8 === 0 || (var10 = (((arg6 + arg8 - arg2 - 257) / arg8) | 0) + arg3) > arg5) {
             var10 = arg5;
@@ -409,12 +409,12 @@ export default class WaveStream extends PcmStream {
                 }
                 this.volumeChangeDelta = 0;
             } else {
-                this.volumeMono += this.field1531 * arg0;
+                this.volumeMono += this.volumeStep * arg0;
                 this.volumeChangeDelta -= arg0;
             }
         }
         this.position += this.pitch * arg0;
-        const var2 = this.field2168 as Wave;
+        const var2 = this.streamable as Wave;
         const var3 = this.loopStartPosition << 8;
         const var4 = this.loopEndPosition << 8;
         const var5 = var2.samples.length << 8;
@@ -521,7 +521,7 @@ export default class WaveStream extends PcmStream {
         }
     }
 
-    method592(arg0: Int32Array | number[], arg1: number, arg2: number, arg3: number, arg4: number): number {
+    mixForwards(arg0: Int32Array | number[], arg1: number, arg2: number, arg3: number, arg4: number): number {
         if (this.volumeChangeDelta > 0) {
             let var6 = this.volumeChangeDelta + arg1;
             if (var6 > arg3) {
@@ -529,9 +529,9 @@ export default class WaveStream extends PcmStream {
             }
             this.volumeChangeDelta += arg1;
             if (this.pitch === 256 && (this.position & 0xFF) === 0) {
-                arg1 = WaveStream.doMixForwards1To1RampMono((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.field1530, this.field1531, var6, arg2, this);
+                arg1 = WaveStream.doMixForwards1To1RampMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.volumeShift, this.volumeStep, var6, arg2, this);
             } else {
-                arg1 = WaveStream.method580((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.field1530, this.field1531, var6, arg2, this, this.pitch, arg4);
+                arg1 = WaveStream.mixForwardsInterpolatedRampMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, this.volumeShift, this.volumeStep, var6, arg2, this, this.pitch, arg4);
             }
             this.volumeChangeDelta -= arg1;
             if (this.volumeChangeDelta !== 0) {
@@ -543,10 +543,10 @@ export default class WaveStream extends PcmStream {
             }
             this.volumeMono = this.volume;
         }
-        return this.pitch === 256 && (this.position & 0xFF) === 0 ? WaveStream.method593((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this) : WaveStream.method591((this.field2168 as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this, this.pitch, arg4);
+        return this.pitch === 256 && (this.position & 0xFF) === 0 ? WaveStream.mixForwards1To1Mono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this) : WaveStream.mixForwardsInterpolatedMono((this.streamable as Wave).samples, arg0, this.position, arg1, this.volumeMono, arg3, arg2, this, this.pitch, arg4);
     }
 
-    static method593(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream): number {
+    static mixForwards1To1Mono(arg0: Int8Array, arg1: Int32Array | number[], arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: WaveStream): number {
         let var8 = arg2 >> 8;
         const var9 = arg6 >> 8;
         const var10 = arg4 << 8;
@@ -571,7 +571,7 @@ export default class WaveStream extends PcmStream {
 
     constructor(arg0: Wave, arg1: number, arg2: number) {
         super();
-        this.field2168 = arg0;
+        this.streamable = arg0;
         this.loopStartPosition = arg0.loopStartPosition;
         this.loopEndPosition = arg0.loopEndPosition;
         this.pitch = arg1;

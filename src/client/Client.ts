@@ -808,8 +808,8 @@ export class Client extends GameShell {
             }
         } else if (this.loadingStep === 45) {
             PcmPlayer.init(null, !Client.lowMem);
-            PcmPlayer.field217 = new WebPcmPlayer();
-            Client.soundMixer = Mixer.method993(null, null);
+            PcmPlayer.activePlayer = new WebPcmPlayer();
+            Client.soundMixer = Mixer.create(null, null);
             TitleScreen.loadPos = 35;
             TitleScreen.loadString = 'Prepared sound engine';
             this.loadingStep = 50;
@@ -1707,7 +1707,7 @@ export class Client extends GameShell {
         this.js5Stream?.close();
         this.js5Stream = null;
         MidiManager.unload();
-        PcmPlayer.method967();
+        PcmPlayer.shutdown();
     }
 
     // ----

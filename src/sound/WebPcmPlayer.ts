@@ -9,15 +9,15 @@ declare global {
 export default class WebPcmPlayer extends PcmPlayer {
     readonly buffer: Int16Array = new Int16Array(256);
     line: AudioBufferSourceNode | null = null;
-    field2360: number = 0;
+    nextBufferTime: number = 0;
 
     override init(arg0: number): void {
         this.capacity = arg0;
-        this.field2360 = window.audioContext.currentTime;
+        this.nextBufferTime = window.audioContext.currentTime;
     }
 
     override queued(): number {
-        const var1 = ((this.field2360 - window.audioContext.currentTime) * PcmPlayer.frequency) | 0;
+        const var1 = ((this.nextBufferTime - window.audioContext.currentTime) * PcmPlayer.frequency) | 0;
         if (var1 <= 0) {
             return this.capacity;
         }
@@ -43,24 +43,24 @@ export default class WebPcmPlayer extends PcmPlayer {
             this.buffer[var1] = var2 >> 8;
             audioData[var1] = this.buffer[var1] / 32768;
         }
-        if (this.field2360 < window.audioContext.currentTime) {
-            this.field2360 = window.audioContext.currentTime;
+        if (this.nextBufferTime < window.audioContext.currentTime) {
+            this.nextBufferTime = window.audioContext.currentTime;
         }
         const line = window.audioContext.createBufferSource();
         line.buffer = audioBuffer;
         line.connect(window.audioContext.destination);
-        line.start(this.field2360);
+        line.start(this.nextBufferTime);
         this.line = line;
-        this.field2360 += audioBuffer.duration;
+        this.nextBufferTime += audioBuffer.duration;
     }
 
     constructor() {
         super(22050);
         PcmPlayer.frequency = 22050;
-        PcmPlayer.field462 = Date.now();
+        PcmPlayer.lastLoopTime = Date.now();
         this.capacity = 16384;
-        this.field2345 = 256;
-        this.field2350 = Date.now();
+        this.availableThreshold = 256;
+        this.nextWriteTime = Date.now();
         this.nextAcceptedCheckTime = Date.now();
     }
 

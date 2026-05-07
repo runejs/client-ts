@@ -5,31 +5,31 @@ import PcmStream from '#/sound/PcmStream.js';
 export default abstract class PcmPlayer extends PcmPlayerBase {
     static samples: Int32Array | null = new Int32Array(256);
     static frequency: number = 0;
-    static field462: number = 0;
-    static field217: PcmPlayerBase | null = null;
-    static field3140: number = 0;
-    static field1157: number = 0;
+    static lastLoopTime: number = 0;
+    static activePlayer: PcmPlayerBase | null = null;
+    static streamTimeSampleCounter: number = 0;
+    static streamTimeMillis: number = 0;
     static stream: PcmStream | null = null;
 
-    field2343: number = 0;
+    availableHistoryIndex: number = 0;
     reopenTime: number = 0;
-    field2345: number = 256;
+    availableThreshold: number = 256;
     skipAcceptedCheck: boolean = false;
-    field2346: number = 0;
-    field2340: number = 0;
-    field2342: number = 0;
-    readonly field2351: Int32Array = new Int32Array(512);
-    field2341: number = 0;
-    field2348: number = 0;
+    availableSum: number = 0;
+    availableMin: number = 0;
+    availableMax: number = 0;
+    readonly availableHistory: Int32Array = new Int32Array(512);
+    emptyBufferCount: number = 0;
+    lastAvailable: number = 0;
     capacity: number = 0;
     nextAcceptedCheckTime: number = 0;
-    field2350: number = 0;
+    nextWriteTime: number = 0;
 
-    static method1050(_component: unknown, _signLink: unknown): void {
-        if (PcmPlayer.field217 === null) {
-            PcmPlayer.field217 = new PcmPlayerBase(8000);
+    static initGlobal(_component: unknown, _signLink: unknown): void {
+        if (PcmPlayer.activePlayer === null) {
+            PcmPlayer.activePlayer = new PcmPlayerBase(8000);
             PcmPlayer.frequency = 8000;
-            PcmPlayer.field462 = Date.now();
+            PcmPlayer.lastLoopTime = Date.now();
         }
     }
 
@@ -42,51 +42,51 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
     }
 
     static loop(): void {
-        if (PcmPlayer.field217 === null) {
+        if (PcmPlayer.activePlayer === null) {
             return;
         }
         const time = Date.now();
-        if (time <= PcmPlayer.field462) {
+        if (time <= PcmPlayer.lastLoopTime) {
             return;
         }
-        PcmPlayer.field217.method255(time);
-        const delta = (time - PcmPlayer.field462) | 0;
-        PcmPlayer.field462 = time;
-        PcmPlayer.field1157 += PcmPlayer.frequency * delta;
-        const samples = ((PcmPlayer.field1157 - PcmPlayer.frequency * 2000) / 1000) | 0;
+        PcmPlayer.activePlayer.process(time);
+        const delta = (time - PcmPlayer.lastLoopTime) | 0;
+        PcmPlayer.lastLoopTime = time;
+        PcmPlayer.streamTimeMillis += PcmPlayer.frequency * delta;
+        const samples = ((PcmPlayer.streamTimeMillis - PcmPlayer.frequency * 2000) / 1000) | 0;
         if (samples > 0) {
             if (PcmPlayer.stream !== null) {
                 PcmPlayer.stream.pretendToMix(samples);
             }
-            PcmPlayer.field1157 -= samples * 1000;
+            PcmPlayer.streamTimeMillis -= samples * 1000;
         }
     }
 
-    static method967(): void {
-        if (PcmPlayer.field217 !== null) {
-            PcmPlayer.field217.play();
-            PcmPlayer.field217 = null;
+    static shutdown(): void {
+        if (PcmPlayer.activePlayer !== null) {
+            PcmPlayer.activePlayer.play();
+            PcmPlayer.activePlayer = null;
         }
     }
 
-    static method260(): void {
+    static skipSamples(): void {
         if (PcmPlayer.stream !== null) {
             PcmPlayer.stream.pretendToMix(256);
         }
-        PcmPlayer.method949(256);
+        PcmPlayer.updateStreamTime(256);
     }
 
     static playStream(arg0: PcmStream): void {
         PcmPlayer.stream = arg0;
     }
 
-    static method949(arg0: number): void {
-        for (PcmPlayer.field3140 += arg0; PcmPlayer.field3140 >= PcmPlayer.frequency; PcmPlayer.field3140 -= PcmPlayer.frequency) {
-            PcmPlayer.field1157 -= PcmPlayer.field1157 >> 2;
+    static updateStreamTime(arg0: number): void {
+        for (PcmPlayer.streamTimeSampleCounter += arg0; PcmPlayer.streamTimeSampleCounter >= PcmPlayer.frequency; PcmPlayer.streamTimeSampleCounter -= PcmPlayer.frequency) {
+            PcmPlayer.streamTimeMillis -= PcmPlayer.streamTimeMillis >> 2;
         }
-        PcmPlayer.field1157 -= arg0 * 1000;
-        if (PcmPlayer.field1157 < 0) {
-            PcmPlayer.field1157 = 0;
+        PcmPlayer.streamTimeMillis -= arg0 * 1000;
+        if (PcmPlayer.streamTimeMillis < 0) {
+            PcmPlayer.streamTimeMillis = 0;
         }
     }
 
@@ -94,10 +94,10 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
         this.init(this.capacity);
         while (true) {
             const var3 = this.queued();
-            if (var3 < this.field2345) {
-                this.field2341 = 0;
-                this.field2348 = 0;
-                this.field2350 = arg0;
+            if (var3 < this.availableThreshold) {
+                this.emptyBufferCount = 0;
+                this.lastAvailable = 0;
+                this.nextWriteTime = arg0;
                 this.nextAcceptedCheckTime = arg0;
                 return;
             }
@@ -105,10 +105,10 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
         }
     }
 
-    method817(arg0: number): void {
+    process0(arg0: number): void {
         if (this.reopenTime !== 0) {
             while (true) {
-                if (this.field2350 >= arg0) {
+                if (this.nextWriteTime >= arg0) {
                     if (arg0 < this.reopenTime) {
                         return;
                     }
@@ -122,12 +122,12 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
                     this.reopenTime = 0;
                     break;
                 }
-                PcmPlayer.method260();
-                this.field2350 += (256000 / PcmPlayer.frequency) | 0;
+                PcmPlayer.skipSamples();
+                this.nextWriteTime += (256000 / PcmPlayer.frequency) | 0;
             }
         }
-        while (this.field2350 < arg0) {
-            this.field2350 += (250880 / PcmPlayer.frequency) | 0;
+        while (this.nextWriteTime < arg0) {
+            this.nextWriteTime += (250880 / PcmPlayer.frequency) | 0;
             let var3: number;
             try {
                 var3 = this.queued();
@@ -136,32 +136,32 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
                 this.reopenTime = arg0;
                 return;
             }
-            this.method819(var3);
-            let var4 = ((this.field2346 * 3 / 512) | 0) - this.field2340 * 2;
+            this.recordAvailable(var3);
+            let var4 = ((this.availableSum * 3 / 512) | 0) - this.availableMin * 2;
             if (var4 < 0) {
                 var4 = 0;
-            } else if (var4 > this.field2342) {
-                var4 = this.field2342;
+            } else if (var4 > this.availableMax) {
+                var4 = this.availableMax;
             }
-            this.field2345 = this.capacity - var4 - 256;
-            if (this.field2345 < 256) {
-                this.field2345 = 256;
+            this.availableThreshold = this.capacity - var4 - 256;
+            if (this.availableThreshold < 256) {
+                this.availableThreshold = 256;
             }
             if (this.capacity < 16384) {
                 if (var3 >= this.capacity) {
-                    this.field2341 += 5;
-                    if (this.field2341 >= 100) {
+                    this.emptyBufferCount += 5;
+                    if (this.emptyBufferCount >= 100) {
                         this.close();
                         this.capacity += 2048;
                         this.reopenTime = arg0;
                         return;
                     }
-                } else if (this.field2348 !== var3 && this.field2341 > 0) {
-                    this.field2341--;
+                } else if (this.lastAvailable !== var3 && this.emptyBufferCount > 0) {
+                    this.emptyBufferCount--;
                 }
             }
-            this.field2348 = var3;
-            if (var3 < this.field2345) {
+            this.lastAvailable = var3;
+            if (var3 < this.availableThreshold) {
                 break;
             }
             try {
@@ -172,7 +172,7 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
                 return;
             }
             this.nextAcceptedCheckTime = arg0;
-            this.field2348 -= 256;
+            this.lastAvailable -= 256;
         }
         if (arg0 < this.nextAcceptedCheckTime + 5000) {
             return;
@@ -180,16 +180,16 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
         this.close();
         this.reopenTime = arg0;
         for (let var5 = 0; var5 < 512; var5++) {
-            this.field2351[var5] = 0;
+            this.availableHistory[var5] = 0;
         }
-        this.field2340 = this.field2342 = this.field2346 = 0;
+        this.availableMin = this.availableMax = this.availableSum = 0;
     }
 
     constructor(arg0: number) {
         super(arg0);
     }
 
-    method818(_signLink: unknown, arg1: number): void {
+    start(_signLink: unknown, arg1: number): void {
         this.capacity = arg1;
         this.skip(Date.now());
     }
@@ -207,50 +207,50 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
                 this.skipAcceptedCheck = false;
                 return;
             }
-            this.method255(Date.now());
+            this.process(Date.now());
         }
     }
 
-    override method255(arg0: number): void {
-        this.method817(arg0);
-        if (this.field2350 < arg0) {
-            this.field2350 = arg0;
+    override process(arg0: number): void {
+        this.process0(arg0);
+        if (this.nextWriteTime < arg0) {
+            this.nextWriteTime = arg0;
         }
     }
 
-    method819(arg0: number): void {
-        const var2 = arg0 - this.field2345;
-        const var3 = this.field2351[this.field2343];
-        this.field2351[this.field2343] = var2;
-        this.field2346 += var2 - var3;
-        const var4 = this.field2343 + 1 & 0x1FF;
-        if (var2 > this.field2342) {
-            this.field2342 = var2;
+    recordAvailable(arg0: number): void {
+        const var2 = arg0 - this.availableThreshold;
+        const var3 = this.availableHistory[this.availableHistoryIndex];
+        this.availableHistory[this.availableHistoryIndex] = var2;
+        this.availableSum += var2 - var3;
+        const var4 = this.availableHistoryIndex + 1 & 0x1FF;
+        if (var2 > this.availableMax) {
+            this.availableMax = var2;
         }
-        if (var2 < this.field2340) {
-            this.field2340 = var2;
+        if (var2 < this.availableMin) {
+            this.availableMin = var2;
         }
-        if (this.field2342 === var3) {
+        if (this.availableMax === var3) {
             let var5 = var2;
-            for (let var6 = var4; this.field2343 !== var6 && var5 < this.field2342; var6 = var6 + 1 & 0x1FF) {
-                const var7 = this.field2351[var6];
+            for (let var6 = var4; this.availableHistoryIndex !== var6 && var5 < this.availableMax; var6 = var6 + 1 & 0x1FF) {
+                const var7 = this.availableHistory[var6];
                 if (var7 > var5) {
                     var5 = var7;
                 }
             }
-            this.field2342 = var5;
+            this.availableMax = var5;
         }
-        if (this.field2340 === var3) {
+        if (this.availableMin === var3) {
             let var8 = var2;
-            for (let var9 = var4; this.field2343 !== var9 && var8 > this.field2340; var9 = var9 + 1 & 0x1FF) {
-                const var10 = this.field2351[var9];
+            for (let var9 = var4; this.availableHistoryIndex !== var9 && var8 > this.availableMin; var9 = var9 + 1 & 0x1FF) {
+                const var10 = this.availableHistory[var9];
                 if (var10 < var8) {
                     var8 = var10;
                 }
             }
-            this.field2340 = var8;
+            this.availableMin = var8;
         }
-        this.field2343 = var4;
+        this.availableHistoryIndex = var4;
     }
 
     abstract init(arg0: number): void;
