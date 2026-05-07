@@ -12892,6 +12892,7 @@ export class Client extends GameShell {
             ClientMouseListener.mouseX = x;
             ClientMouseListener.mouseY = y;
             ClientMouseListener.mouseButton = 0;
+            ClientMouseListener.nextMouseButton = 0;
 
             this.sx = this.nx = this.mx = event.screenX | 0;
             this.sy = this.ny = this.my = event.screenY | 0;
@@ -12928,9 +12929,12 @@ export class Client extends GameShell {
                 ClientMouseListener.nextMouseClickY = -1;
                 ClientMouseListener.nextMouseClickButton = 0;
                 ClientMouseListener.mouseButton = 0;
+                ClientMouseListener.nextMouseButton = 0;
             } else if (this.panning) {
                 // ignore up events if the player was moving the camera
                 this.panning = false;
+                ClientMouseListener.mouseButton = 0;
+                ClientMouseListener.nextMouseButton = 0;
                 this.releaseCameraKeys();
                 return;
             } else {
@@ -12979,6 +12983,7 @@ export class Client extends GameShell {
             ClientMouseListener.mouseX = x;
             ClientMouseListener.mouseY = y;
             ClientMouseListener.mouseButton = 0;
+            ClientMouseListener.nextMouseButton = 0;
 
             this.sx = this.nx = this.mx = event.screenX | 0;
             this.sy = this.ny = this.my = event.screenY | 0;
@@ -13003,6 +13008,8 @@ export class Client extends GameShell {
         } else {
             // custom: touchscreen support
             ClientMouseListener.idleTimer = 0;
+            ClientMouseListener.mouseButton = 0;
+            ClientMouseListener.nextMouseButton = 0;
             this.releaseCameraKeys();
         }
     }
@@ -13012,6 +13019,8 @@ export class Client extends GameShell {
             ClientMouseListener.idleTimer = 0;
             this.dragging = false;
             this.panning = false;
+            ClientMouseListener.mouseButton = 0;
+            ClientMouseListener.nextMouseButton = 0;
             this.releaseCameraKeys();
         }
     }
@@ -13030,7 +13039,8 @@ export class Client extends GameShell {
             this.ny = event.screenY | 0;
 
             if (this.dragging) {
-                // no-op
+                ClientMouseListener.mouseButton = 1;
+                ClientMouseListener.nextMouseButton = 1;
             } else if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && this.exceedsGrabThreshold(20)) {
                 MobileKeyboard.notifyTouchMove(x, y);
             } else if (this.startedInGame && !this.isGameObscured() && this.exceedsGrabThreshold(20)) {
@@ -13065,6 +13075,7 @@ export class Client extends GameShell {
                     ClientMouseListener.nextMouseClickY = y;
                     ClientMouseListener.nextMouseClickButton = 1;
                     ClientMouseListener.mouseButton = 1;
+                    ClientMouseListener.nextMouseButton = 1;
                 }
             }
 
@@ -13085,6 +13096,7 @@ export class Client extends GameShell {
         ClientMouseListener.nextMouseClickY = -1;
         ClientMouseListener.nextMouseClickButton = 0;
         ClientMouseListener.mouseButton = 0;
+        ClientMouseListener.nextMouseButton = 0;
     }
 
     private exceedsGrabThreshold(size: number) {
