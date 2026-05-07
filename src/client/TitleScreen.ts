@@ -10,6 +10,7 @@ import Pix32 from '#/graphics/Pix32.js';
 import PixFont from '#/graphics/PixFont.js';
 import PixLoader from '#/graphics/PixLoader.js';
 import PixMap from '#/graphics/PixMap.js';
+import MidiManager from '#/sound/MidiManager.js';
 import { arraycopy } from '#/util/JsUtil.js';
 import type Js5 from '#/js5/Js5.js';
 import type Js5Loader from '#/js5/Js5Loader.js';
@@ -192,12 +193,15 @@ export default class TitleScreen {
         TitleScreen.flameBuffer3 = new Int32Array(32768);
         TitleScreen.generateFlameCoolingMap(null);
 
-        // todo: Js5Net.sendLoginLogoutPacket here
-        // todo: play scape_main here
-
         TitleScreen.loginPass = '';
         TitleScreen.loginUser = '';
         TitleScreen.loginscreen = 0;
+        if (Client.midiVolume === 0 || Client.lowMem) {
+            MidiManager.method672();
+        } else if (Client.songs) {
+            MidiManager.method679(Client.songs, 'scape main', '', Client.midiVolume);
+        }
+        // todo: Js5Net.sendLoginLogoutPacket here
         GameShell.fullredraw = true;
         TitleScreen.open = true;
     }
@@ -229,6 +233,7 @@ export default class TitleScreen {
         TitleScreen.flameBuffer1 = null;
         TitleScreen.flameBuffer2 = null;
         TitleScreen.flameBuffer3 = null;
+        MidiManager.method672();
         TitleScreen.open = false;
     }
 

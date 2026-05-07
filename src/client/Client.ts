@@ -1,5 +1,4 @@
 import { playWave, setWaveVolume } from '#3rdparty/audio.js';
-import { stopMidi, setMidiVolume, playMidi } from '#3rdparty/tinymidipcm.js';
 
 import ClientBuild from '#/client/ClientBuild.js';
 import { ClientCode } from '#/client/ClientCode.js';
@@ -75,6 +74,8 @@ import Huffman from '#/wordfilter/Huffman.js';
 
 import BgSound from '#/sound/BgSound.js';
 import JagFX from '#/sound/JagFX.js';
+import MidiManager from '#/sound/MidiManager.js';
+import PcmPlayer from '#/sound/PcmPlayer.js';
 import PacketBit from '#/io/PacketBit.js';
 
 const CLIENT_VERSION = 435;
@@ -109,6 +110,7 @@ export class Client extends GameShell {
     static nodeId: number = 10;
     static memServer: boolean = true;
     static lowMem: boolean = false;
+    static midiVolume: number = 255;
 
     static cyclelogic1: number = 0;
     static cyclelogic2: number = 0;
@@ -199,12 +201,12 @@ export class Client extends GameShell {
     public interfaces: Js5Loader | null = null;
     public jagFX: Js5Loader | null = null;
     public maps: Js5Loader | null = null;
-    public songs: Js5Loader | null = null;
+    public static songs: Js5Loader | null = null;
     public models: Js5Loader | null = null;
     public static sprites: Js5Loader | null = null;
     public textures: Js5Loader | null = null;
     public static binary: Js5Loader | null = null;
-    public jingles: Js5Loader | null = null;
+    public static jingles: Js5Loader | null = null;
     public scripts: Js5Loader | null = null;
     private js5Net: Js5Net = new Js5Net();
     private js5Archives: Js5Loader[] = [];
@@ -545,12 +547,8 @@ export class Client extends GameShell {
     private minimapFlagX: number = 0;
     private minimapFlagZ: number = 0;
 
-    private midiVolume: number = 255;
-    private midiSong: number = -1;
     private nextMidiSong: number = -1;
     private nextMusicDelay: number = 0;
-    private midiFading: boolean = false;
-    private midiRequestId: number = 0;
 
     private waveVolume: number = 127;
     private ambientVolume: number = 0;
@@ -710,66 +708,6 @@ export class Client extends GameShell {
         return Client.state === ClientMainState.GAME || Client.state === ClientMainState.FULLSCREEN;
     }
 
-    saveMidi(data: Uint8Array, fading: boolean) {
-        if (this.midiVolume === 0) {
-            return;
-        }
-        playMidi(data, 20 * Math.log10(this.midiVolume / 255), fading);
-    }
-
-    private requestMidiSong(songId: number, fading: boolean): void {
-        if (!this.songs || songId < 0 || this.midiVolume === 0) {
-            return;
-        }
-
-        this.midiSong = songId;
-        this.midiFading = fading;
-        this.loadMidi(this.songs, songId, fading, ++this.midiRequestId);
-    }
-
-    private requestMidiSongByName(group: string, file: string, fading: boolean): void {
-        if (!this.songs || this.midiVolume === 0) {
-            return;
-        }
-
-        const groupId = this.songs.getGroupId(group);
-        if (groupId < 0) {
-            return;
-        }
-
-        this.midiSong = groupId;
-        this.midiFading = fading;
-        this.loadMidi(this.songs, groupId, fading, ++this.midiRequestId, file);
-    }
-
-    private requestMidiJingle(jingleId: number): void {
-        if (!this.jingles || jingleId < 0 || this.midiVolume === 0) {
-            return;
-        }
-
-        this.midiSong = jingleId;
-        this.midiFading = false;
-        this.loadMidi(this.jingles, jingleId, false, ++this.midiRequestId);
-    }
-
-    private async loadMidi(archive: Js5Loader, group: number, fading: boolean, requestId: number, fileName: string | null = null): Promise<void> {
-        await archive.fetchGroup(group, true);
-        let data: Uint8Array | null;
-        if (fileName === null) {
-            data = archive.getFile(0, group) ?? archive.getFile(group);
-        } else {
-            const file = archive.getFileId(group, fileName);
-            if (file < 0 && fileName !== '') {
-                data = null;
-            } else {
-                data = archive.getFile(file < 0 ? 0 : file, group);
-            }
-        }
-        if (data && this.midiRequestId === requestId && this.midiVolume !== 0) {
-            this.saveMidi(data, fading);
-        }
-    }
-
     // ----
 
     override async maininit() {
@@ -823,12 +761,12 @@ export class Client extends GameShell {
             this.interfaces = this.openJs5(3, true, false, true);
             this.jagFX = this.openJs5(4, true, false, true);
             this.maps = this.openJs5(5, true, true, true);
-            this.songs = this.openJs5(6, false, true, true);
+            Client.songs = this.openJs5(6, false, true, true);
             this.models = this.openJs5(7, true, false, true);
             Client.sprites = this.openJs5(8, true, false, true);
             this.textures = this.openJs5(9, true, false, true);
             Client.binary = this.openJs5(10, true, false, true);
-            this.jingles = this.openJs5(11, true, false, true);
+            Client.jingles = this.openJs5(11, true, false, true);
             this.scripts = this.openJs5(12, true, false, true);
 
             TitleScreen.loadPos = 20;
@@ -837,8 +775,8 @@ export class Client extends GameShell {
         } else if (this.loadingStep === 40) {
             if (!this.anims || !this.bases || !this.configs ||
                 !this.interfaces || !this.jagFX || !this.maps ||
-                !this.songs || !this.models || !Client.sprites ||
-                !this.textures || !Client.binary || !this.jingles ||
+                !Client.songs || !this.models || !Client.sprites ||
+                !this.textures || !Client.binary || !Client.jingles ||
                 !this.scripts
             ) {
                 throw new Error();
@@ -850,12 +788,12 @@ export class Client extends GameShell {
             progress = (progress + ((this.interfaces.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((this.jagFX.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((this.maps.getIndexPercentage() * 5) / 100) | 0) | 0;
-            progress = (progress + ((this.songs.getIndexPercentage() * 5) / 100) | 0) | 0;
+            progress = (progress + ((Client.songs.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((this.models.getIndexPercentage() * 40) / 100) | 0) | 0;
             progress = (progress + ((Client.sprites.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((this.textures.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((Client.binary.getIndexPercentage() * 5) / 100) | 0) | 0;
-            progress = (progress + ((this.jingles.getIndexPercentage() * 5) / 100) | 0) | 0;
+            progress = (progress + ((Client.jingles.getIndexPercentage() * 5) / 100) | 0) | 0;
             progress = (progress + ((this.scripts.getIndexPercentage() * 5) / 100) | 0) | 0;
 
             if (progress === 100) {
@@ -870,7 +808,7 @@ export class Client extends GameShell {
                 TitleScreen.loadPos = 30;
             }
         } else if (this.loadingStep === 45) {
-            // todo: init pcm player/sound mixer/decimator
+            PcmPlayer.init(null, !Client.lowMem);
             TitleScreen.loadPos = 35;
             TitleScreen.loadString = 'Prepared sound engine';
             this.loadingStep = 50;
@@ -918,13 +856,6 @@ export class Client extends GameShell {
                 TitleScreen.loadPos = 50;
                 TitleScreen.loadString = 'Loaded title screen';
                 await TitleScreen.init(Client.binary, Client.sprites, this.sWid);
-
-                // todo: move to TitleScreen.init
-                if (this.midiVolume !== 0 && !Client.lowMem) {
-                    this.requestMidiSongByName('scape main', '', false);
-                } else {
-                    stopMidi(false);
-                }
 
                 Client.setMainState(ClientMainState.TITLE_LOADING);
                 this.loadingStep = 70;
@@ -1680,6 +1611,8 @@ export class Client extends GameShell {
         this.loopCycle++;
         Client.loopCycle = this.loopCycle;
         await this.serviceNetClient();
+        MidiManager.method680();
+        PcmPlayer.shutdown();
         ClientKeyboardListener.loop();
         ClientMouseListener.loop();
 
@@ -1772,6 +1705,8 @@ export class Client extends GameShell {
         this.js5Net.close();
         this.js5Stream?.close();
         this.js5Stream = null;
+        MidiManager.method674();
+        PcmPlayer.method967();
     }
 
     // ----
@@ -2024,8 +1959,8 @@ export class Client extends GameShell {
             if (Client.loginStep === 5) {
                 if (!this.anims || !this.bases || !this.configs ||
                     !this.interfaces || !this.jagFX || !this.maps ||
-                    !this.songs || !this.models || !Client.sprites ||
-                    !this.textures || !Client.binary || !this.jingles ||
+                    !Client.songs || !this.models || !Client.sprites ||
+                    !this.textures || !Client.binary || !Client.jingles ||
                     !this.scripts
                 ) {
                     throw new Error();
@@ -2060,12 +1995,12 @@ export class Client extends GameShell {
                 this.loginout.p4(this.interfaces.crc);
                 this.loginout.p4(this.jagFX.crc);
                 this.loginout.p4(this.maps.crc);
-                this.loginout.p4(this.songs.crc);
+                this.loginout.p4(Client.songs.crc);
                 this.loginout.p4(this.models.crc);
                 this.loginout.p4(Client.sprites.crc);
                 this.loginout.p4(this.textures.crc);
                 this.loginout.p4(Client.binary.crc);
-                this.loginout.p4(this.jingles.crc);
+                this.loginout.p4(Client.jingles.crc);
                 this.loginout.p4(this.scripts.crc);
                 this.loginout.pdata(this.out.data, 0, this.out.pos);
 
@@ -2804,9 +2739,8 @@ export class Client extends GameShell {
         }
 
         BgSound.reset();
-        stopMidi(false);
+        MidiManager.method672();
         this.nextMidiSong = -1;
-        this.midiSong = -1;
         this.nextMusicDelay = 0;
     }
 
@@ -2829,12 +2763,12 @@ export class Client extends GameShell {
         this.interfaces?.discardAllFiles();
         this.jagFX?.discardAllFiles();
         this.maps?.discardAllFiles();
-        this.songs?.discardAllFiles();
+        Client.songs?.discardAllFiles();
         this.models?.discardAllFiles();
         Client.sprites?.discardAllFiles();
         this.textures?.discardAllFiles();
         Client.binary?.discardAllFiles();
-        this.jingles?.discardAllFiles();
+        Client.jingles?.discardAllFiles();
         this.scripts?.discardAllFiles();
     }
 
@@ -3784,9 +3718,8 @@ export class Client extends GameShell {
                 this.nextMusicDelay = 0;
             }
 
-            if (this.nextMusicDelay === 0 && this.midiVolume !== 0 && this.nextMidiSong !== -1 && !Client.lowMem) {
-                this.midiSong = this.nextMidiSong;
-                this.requestMidiSong(this.midiSong, false);
+            if (this.nextMusicDelay === 0 && Client.midiVolume !== 0 && this.nextMidiSong !== -1 && !Client.lowMem && Client.songs) {
+                MidiManager.play(0, this.nextMidiSong, Client.midiVolume, Client.songs);
             }
         }
     }
@@ -7796,10 +7729,9 @@ export class Client extends GameShell {
                 }
 
                 if (songId === -1 && this.nextMusicDelay === 0) {
-                    stopMidi(false);
-                    this.midiRequestId++;
-                } else if (this.nextMidiSong != songId && this.midiVolume !== 0 && !Client.lowMem && this.nextMusicDelay === 0) {
-                    this.requestMidiSong(songId, true);
+                    MidiManager.stop();
+                } else if (this.nextMidiSong != songId && Client.midiVolume !== 0 && !Client.lowMem && this.nextMusicDelay === 0 && Client.songs) {
+                    MidiManager.method670(Client.midiVolume, songId, Client.songs, 0);
                 }
 
                 this.nextMidiSong = songId;
@@ -7812,8 +7744,8 @@ export class Client extends GameShell {
                 const jingleId: number = this.in.g2();
                 const delay: number = this.in.g2();
 
-                if (this.midiVolume !== 0 && !Client.lowMem) {
-                    this.requestMidiJingle(jingleId);
+                if (Client.midiVolume !== 0 && !Client.lowMem && Client.jingles) {
+                    MidiManager.play(1, jingleId, Client.midiVolume, Client.jingles);
                     this.nextMusicDelay = delay;
                 }
 
@@ -12024,20 +11956,20 @@ export class Client extends GameShell {
                 volume = 64;
             }
 
-            if (this.midiVolume !== volume) {
-                if (this.midiVolume === 0 && this.nextMidiSong !== -1) {
-                    this.midiVolume = volume;
-                    this.requestMidiSong(this.nextMidiSong, false);
+            if (Client.midiVolume !== volume) {
+                if (Client.midiVolume === 0 && this.nextMidiSong !== -1) {
+                    if (Client.songs) {
+                        MidiManager.play(0, this.nextMidiSong, volume, Client.songs);
+                    }
+                    Client.midiVolume = volume;
                     this.nextMusicDelay = 0;
                 } else if (volume === 0) {
-                    this.midiVolume = volume;
-                    this.midiRequestId++;
-                    stopMidi(false);
+                    MidiManager.stop();
                     this.nextMusicDelay = 0;
                 } else {
-                    this.midiVolume = volume;
-                    setMidiVolume(20 * Math.log10(this.midiVolume / 255));
+                    MidiManager.setVolume(volume);
                 }
+                Client.midiVolume = volume;
             }
         } else if (clientcode === 4) {
             if (value === 0) {

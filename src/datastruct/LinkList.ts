@@ -1,7 +1,7 @@
 import Linkable from '#/datastruct/Linkable.js';
 
 export default class LinkList<T extends Linkable> {
-    private readonly sentinel: Linkable = new Linkable();
+    readonly sentinel: Linkable = new Linkable();
     private cursor: Linkable | null = null;
 
     constructor() {
@@ -111,7 +111,7 @@ export default class LinkList<T extends Linkable> {
     }
 
     insertBefore(arg0: T, arg1: T): void {
-        if (!arg1.prev !== null) {
+        if (arg1.prev !== null) {
             arg1.unlink();
         }
 
