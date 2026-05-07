@@ -5,30 +5,32 @@ import Pix3D from '#/dash3d/Pix3D.js';
 import PixMap from '#/graphics/PixMap.js';
 
 import { sleep } from '#/util/JsUtil.js';
+import MonotonicTime from '#/util/MonotonicTime.js';
+import Timer from '#/util/Timer.js';
+import { TypedArray1d } from '#/util/Arrays.js';
 
 export default abstract class GameShell {
-    public static fullredraw: boolean = true;
-    private static progressBar: HTMLCanvasElement | null = null;
-
-    protected state: number = 0;
-    protected deltime: number = 20;
-    protected mindel: number = 1;
-    protected otim: number[] = new Array(10);
-    protected fps: number = 0;
-    protected debug: boolean = false;
-    public static drawArea: PixMap | null = null;
-    protected focus: boolean = true;
-
-    /// custom
-    protected resizeToFit: boolean = false;
-    protected tfps: number = 50;
-    private alreadyErrored: boolean = false;
-
-    private readonly resizeHandler = (): void => {
-        if (this.resizeToFit) {
-            this.resize(window.innerWidth, window.innerHeight);
-        }
-    };
+    static shell: GameShell | null = null;
+    static killtime = 0;
+    static alreadyshutdown = false;
+    alreadyerrored = false;
+    static updateCount = 0;
+    static deltime = 20;
+    static mindel = 1;
+    static fps = 0;
+    static timer: Timer | null = null;
+    static drawTime: number[] = new TypedArray1d(32, 0);
+    static drawPos = 0;
+    static updateTime: number[] = new TypedArray1d(32, 0);
+    static updatePos = 0;
+    static sWid = 0;
+    static sHei = 0;
+    static progressBar: HTMLCanvasElement | null = null;
+    static drawArea: PixMap | null = null;
+    static fullredraw = true;
+    static redrawNum = 0;
+    static focus_in = true;
+    static focus = false;
 
     protected async maininit() { }
     protected mainquit() { }
@@ -36,16 +38,22 @@ export default abstract class GameShell {
     protected async mainredraw() { }
     protected refresh() { }
 
-    constructor(resizetoFit: boolean = false) {
-        canvas.tabIndex = -1;
-        canvas2d.fillStyle = 'black';
-        canvas2d.fillRect(0, 0, canvas.width, canvas.height);
+    constructor() {
+        try {
+            if (GameShell.shell !== null) {
+                this.error('alreadyloaded');
+                return;
+            }
 
-        this.resizeToFit = resizetoFit;
-        if (this.resizeToFit) {
-            this.resize(window.innerWidth, window.innerHeight);
-        } else {
-            this.resize(canvas.width, canvas.height);
+            canvas.tabIndex = -1;
+            canvas2d.fillStyle = 'black';
+            canvas2d.fillRect(0, 0, canvas.width, canvas.height);
+
+            GameShell.shell = this;
+            GameShell.sWid = canvas.width;
+            GameShell.sHei = canvas.height;
+        } catch {
+            this.error('crash');
         }
     }
 
@@ -65,11 +73,11 @@ export default abstract class GameShell {
     }
 
     public error(message: string): void {
-        if (this.alreadyErrored) {
+        if (this.alreadyerrored) {
             return;
         }
 
-        this.alreadyErrored = true;
+        this.alreadyerrored = true;
         const page = `error_game_${message}`;
         globalThis.console.log(page);
         try {
@@ -80,133 +88,58 @@ export default abstract class GameShell {
     }
 
     async run() {
-        window.addEventListener('resize', this.resizeHandler, false);
+        try {
+            canvas.onfocus = this.onfocus.bind(this);
+            canvas.onblur = this.onblur.bind(this);
 
-        canvas.onfocus = this.onfocus.bind(this);
-        canvas.onblur = this.onblur.bind(this);
+            if (this.isTouchDevice && !this.hasTouchEvents) {
+                // edge case: we can't control canvas touch action behavior to allow zooming
+                // device has a touch screen but browser does not expose touchstart
+                canvas.style.touchAction = 'none';
+            }
 
-        if (this.isTouchDevice && !this.hasTouchEvents) {
-            // edge case: we can't control canvas touch action behavior to allow zooming
-            // device has a touch screen but browser does not expose touchstart
-            canvas.style.touchAction = 'none';
+            // Preventing mouse events from bubbling up to the context menu in the browser for our canvas.
+            // This may need to be hooked up to our own context menu in the future.
+            canvas.oncontextmenu = (e: MouseEvent): void => {
+                e.preventDefault();
+            };
+
+            window.oncontextmenu = (e: MouseEvent): void => {
+                e.preventDefault();
+            };
+
+            await this.drawProgress('Loading...', 0);
+            await this.maininit();
+
+            GameShell.timer = Timer.create();
+            GameShell.timer.init();
+            while (GameShell.killtime === 0 || MonotonicTime.currentTime() < GameShell.killtime) {
+                const frameStart: number = performance.now();
+                GameShell.updateCount = await GameShell.timer.count(GameShell.deltime, GameShell.mindel);
+                for (let i: number = 0; i < GameShell.updateCount; i++) {
+                    await this.mainloopwrapper();
+                }
+                await this.mainredrawwrapper();
+            }
+        } catch {
+            this.error('crash');
         }
 
-        // Preventing mouse events from bubbling up to the context menu in the browser for our canvas.
-        // This may need to be hooked up to our own context menu in the future.
-        canvas.oncontextmenu = (e: MouseEvent): void => {
-            e.preventDefault();
-        };
-
-        window.oncontextmenu = (e: MouseEvent): void => {
-            e.preventDefault();
-        };
-
-        await this.drawProgress('Loading...', 0);
-        await this.maininit();
-
-        let ntime: number = 0;
-        let opos: number = 0;
-        let ratio: number = 256;
-        let delta: number = 1;
-        let count: number = 0;
-
-        for (let i: number = 0; i < 10; i++) {
-            this.otim[i] = performance.now();
-        }
-
-        while (this.state >= 0) {
-            if (this.state > 0) {
-                this.state--;
-
-                if (this.state === 0) {
-                    this.shutdown();
-                    return;
-                }
-            }
-
-            const lastRatio: number = ratio;
-            const lastDelta: number = delta;
-
-            ratio = 300;
-            delta = 1;
-
-            ntime = performance.now();
-
-            const otim: number = this.otim[opos];
-            if (otim === 0) {
-                ratio = lastRatio;
-                delta = lastDelta;
-            } else if (ntime > otim) {
-                ratio = ((this.deltime * 2560) / (ntime - otim)) | 0;
-            }
-
-            if (ratio < 25) {
-                ratio = 25;
-            } else if (ratio > 256) {
-                ratio = 256;
-                delta = (this.deltime - (ntime - otim) / 10) | 0;
-            }
-
-            this.otim[opos] = ntime;
-            opos = (opos + 1) % 10;
-
-            if (delta > 1) {
-                for (let i: number = 0; i < 10; i++) {
-                    if (this.otim[i] !== 0) {
-                        this.otim[i] += delta;
-                    }
-                }
-            }
-
-            if (delta < this.mindel) {
-                delta = this.mindel;
-            }
-
-            await sleep(delta);
-
-            while (count < 256) {
-                await this.mainloop();
-                count += ratio;
-            }
-            count &= 0xff;
-
-            if (this.deltime > 0) {
-                this.fps = ((ratio * 1000) / (this.deltime * 256)) | 0;
-            }
-
-            await this.mainredraw();
-
-            // this is custom for targeting specific fps (on mobile).
-            if (this.tfps < 50) {
-                const tfps: number = 1000 / this.tfps - (performance.now() - ntime);
-                if (tfps > 0) {
-                    await sleep(tfps);
-                }
-            }
-
-            if (this.debug) {
-                console.log('ntime:' + ntime);
-                for (let i = 0; i < 10; i++) {
-                    const o = (opos - i - 1 + 20) % 10;
-                    console.log('otim' + o + ':' + this.otim[o]);
-                }
-                console.log('fps:' + this.fps + ' ratio:' + ratio + ' count:' + count);
-                console.log('del:' + delta + ' deltime:' + this.deltime + ' mindel:' + this.mindel);
-                console.log('opos:' + opos);
-                this.debug = false;
-            }
-        }
-
-        if (this.state === -1) {
-            this.shutdown();
-        }
+        this.shutdown();
     }
 
     protected shutdown() {
-        this.state = -2;
-        this.mainquit();
+        if (GameShell.alreadyshutdown) {
+            return;
+        }
 
-        window.removeEventListener('resize', this.resizeHandler, false);
+        GameShell.alreadyshutdown = true;
+
+        try {
+            this.mainquit();
+        } catch {
+        }
+
         canvas.onfocus = null;
         canvas.onblur = null;
         canvas.oncontextmenu = null;
@@ -214,27 +147,69 @@ export default abstract class GameShell {
     }
 
     protected setFramerate(rate: number) {
-        this.deltime = (1000 / rate) | 0;
-    }
-
-    protected setTargetedFramerate(rate: number) {
-        this.tfps = Math.max(Math.min(50, rate | 0), 0);
+        GameShell.deltime = (1000 / rate) | 0;
     }
 
     protected start() {
-        if (this.state >= 0) {
-            this.state = 0;
+        if (!GameShell.alreadyshutdown) {
+            GameShell.killtime = 0;
         }
     }
 
     protected stop() {
-        if (this.state >= 0) {
-            this.state = (4000 / this.deltime) | 0;
+        if (!GameShell.alreadyshutdown) {
+            GameShell.killtime = MonotonicTime.currentTime() + 4000;
         }
     }
 
     public static resetProgress(): void {
         GameShell.progressBar = null;
+    }
+
+    public static doneslowupdate(): void {
+        GameShell.timer?.init();
+        for (let i: number = 0; i < 32; i++) {
+            GameShell.drawTime[i] = 0;
+        }
+        for (let i: number = 0; i < 32; i++) {
+            GameShell.updateTime[i] = 0;
+        }
+        GameShell.updateCount = 0;
+    }
+
+    public static doneslowupdate2(): void {
+        GameShell.timer?.reset();
+        for (let i: number = 0; i < 32; i++) {
+            GameShell.drawTime[i] = 0;
+        }
+        for (let i: number = 0; i < 32; i++) {
+            GameShell.updateTime[i] = 0;
+        }
+        GameShell.updateCount = 0;
+    }
+
+    protected async mainredrawwrapper(): Promise<void> {
+        const time: number = MonotonicTime.currentTime();
+        const previous: number = GameShell.drawTime[GameShell.drawPos];
+        GameShell.drawTime[GameShell.drawPos] = time;
+        if (previous !== 0 && previous < time) {
+            const delta: number = time - previous;
+            GameShell.fps = (((delta >> 1) + 32000) / delta) | 0;
+        }
+        GameShell.drawPos = (GameShell.drawPos + 1) & 0x1f;
+        if (GameShell.redrawNum++ > 50) {
+            GameShell.redrawNum -= 50;
+            GameShell.fullredraw = true;
+        }
+        await this.mainredraw();
+    }
+
+    protected async mainloopwrapper(): Promise<void> {
+        const time: number = MonotonicTime.currentTime();
+        GameShell.updateTime[GameShell.updatePos] = time;
+        GameShell.updatePos = (GameShell.updatePos + 1) & 0x1f;
+        GameShell.focus = GameShell.focus_in;
+        await this.mainloop();
     }
 
     protected async drawProgress(message: string, progress: number): Promise<void> {
@@ -308,13 +283,13 @@ export default abstract class GameShell {
     }
 
     private onfocus(_e: FocusEvent) {
-        this.focus = true;
+        GameShell.focus_in = true;
         GameShell.fullredraw = true;
         this.refresh();
     }
 
     private onblur(_e: FocusEvent) {
-        this.focus = false;
+        GameShell.focus_in = false;
 
         // custom: taken from later version to release all keys
         ClientKeyboardListener.keyHeld.fill(0);

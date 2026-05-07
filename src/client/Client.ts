@@ -777,11 +777,6 @@ export class Client extends GameShell {
         ClientKeyboardListener.addListeners(canvas);
         ClientMouseListener.addListeners(canvas);
 
-        if (this.isMobile && Client.lowMem) {
-            // force mobile on low detail mode to 30 fps
-            this.setTargetedFramerate(30);
-        }
-
         try {
             this.db = new Database(await Database.openDatabase());
         } catch (_e) {
@@ -1690,10 +1685,10 @@ export class Client extends GameShell {
 
         if (Client.state === ClientMainState.LOADING) {
             await this.mainLoad();
-            // doneslowupdate
+            GameShell.doneslowupdate();
         } else if (Client.state === ClientMainState.TITLE_LOADING) {
             await this.mainLoad();
-            // doneslowupdate
+            GameShell.doneslowupdate();
         } else if (Client.state === ClientMainState.TITLE) {
             TitleScreen.loop();
         } else if (Client.state === ClientMainState.LOGIN) {
@@ -2241,7 +2236,7 @@ export class Client extends GameShell {
         this.mouseTracking.length = 0;
         this.mouseTrackDelta = 0;
         this.focusIn = true;
-        this.focus = true;
+        GameShell.focus = true;
         this.ptype1 = -1;
         this.isMenuOpen = false;
         this.ptype0 = -1;
@@ -2494,11 +2489,11 @@ export class Client extends GameShell {
             this.out.p2(this.orbitCameraPitch);
         }
 
-        if (this.focus && !this.focusIn) {
+        if (GameShell.focus && !this.focusIn) {
             this.focusIn = true;
             this.out.p1Enc(ClientProt.EVENT_APPLET_FOCUS);
             this.out.p1(1);
-        } else if (!this.focus && this.focusIn) {
+        } else if (!GameShell.focus && this.focusIn) {
             this.focusIn = false;
             this.out.p1Enc(ClientProt.EVENT_APPLET_FOCUS);
             this.out.p1(0);
@@ -5241,11 +5236,11 @@ export class Client extends GameShell {
             let y: number = 20;
 
             let colour: number = Colour.YELLOW;
-            if (this.fps < 15) {
+            if (GameShell.fps < 15) {
                 colour = Colour.RED;
             }
 
-            this.p12?.drawStringRight('Fps:' + this.fps, x, y, colour);
+            this.p12?.drawStringRight('Fps:' + GameShell.fps, x, y, colour);
             y += 15;
 
             let memoryUsage = -1;
@@ -5724,6 +5719,7 @@ export class Client extends GameShell {
         }
 
         this.out.p1Enc(ClientProt.MAP_BUILD_COMPLETE);
+        GameShell.doneslowupdate2();
         Client.setMainState(this.fullModalId1 === -1 ? ClientMainState.GAME : ClientMainState.FULLSCREEN);
     }
 
