@@ -2,7 +2,7 @@ import { Client } from '#/client/Client.js';
 import ClientKeyboardListener from '#/client/ClientKeyboardListener.js';
 import ClientMouseListener from '#/client/ClientMouseListener.js';
 import GameShell from '#/client/GameShell.js';
-import JString from '#/datastruct/JString.js';
+import JString from '#/jstring/JString.js';
 import { Colour } from '#/graphics/Colour.js';
 import Pix2D from '#/graphics/Pix2D.js';
 import Pix8 from '#/graphics/Pix8.js';

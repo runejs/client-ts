@@ -1,7 +1,7 @@
 import { gunzipSync } from 'fflate';
 
 import IntHashTable from '#/datastruct/IntHashTable.js';
-import JString from '#/datastruct/JString.js';
+import JString from '#/jstring/JString.js';
 
 import { bunzip2 } from '#/io/BZip2.js';
 import Packet from '#/io/Packet.js';

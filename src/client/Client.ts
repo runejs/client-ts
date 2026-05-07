@@ -44,7 +44,7 @@ import { MapFlag } from '#/dash3d/MapFlag.js';
 import MapSpotAnim from '#/dash3d/MapSpotAnim.js';
 import World from '#/dash3d/World.js';
 
-import JString from '#/datastruct/JString.js';
+import JString from '#/jstring/JString.js';
 import LinkList from '#/datastruct/LinkList.js';
 
 import { Int32Array2d, TypedArray1d, TypedArray3d, Int32Array3d, Uint8Array3d } from '#/util/Arrays.js';

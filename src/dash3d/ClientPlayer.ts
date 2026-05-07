@@ -3,7 +3,7 @@ import SpotType from '#/config/SpotType.js';
 import SeqType from '#/config/SeqType.js';
 import { Client } from '#/client/Client.js';
 
-import JString from '#/datastruct/JString.js';
+import JString from '#/jstring/JString.js';
 
 import ClientEntity from '#/dash3d/ClientEntity.js';
 import Model from '#/dash3d/Model.js';
