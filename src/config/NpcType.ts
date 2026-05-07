@@ -34,7 +34,7 @@ export default class NpcType extends Linkable2 {
     turnrightanim: number = -1;
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
-    op: (string | null)[] | null = null;
+    op: (string | null)[] = new TypedArray1d(5, null);
     active: boolean = true;
     minimap: boolean = true;
     vislevel: number = -1;
@@ -117,11 +117,7 @@ export default class NpcType extends Linkable2 {
             this.walkanim_b = dat.g2();
             this.walkanim_r = dat.g2();
             this.walkanim_l = dat.g2();
-        } else if (code >= 30 && code < 40) {
-            if (!this.op) {
-                this.op = new TypedArray1d(5, null);
-            }
-
+        } else if (code >= 30 && code < 35) {
             this.op[code - 30] = dat.gjstr();
             if (this.op[code - 30]?.toLowerCase() === 'hidden') {
                 this.op[code - 30] = null;

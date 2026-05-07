@@ -9,7 +9,7 @@ import GameShell from '#/client/GameShell.js';
 import { MiniMenuAction } from '#/client/MiniMenuAction.js';
 import MobileKeyboard from '#/client/MobileKeyboard.js';
 import MouseTracking from '#/client/MouseTracking.js';
-import Skill from '#/client/Skill.js';
+import Skills from '#/constants/Skill.js';
 import TitleScreen from '#/client/TitleScreen.js';
 
 import FloType from '#/config/FloType.js';
@@ -103,7 +103,7 @@ const enum ClientMainState {
 }
 
 export class Client extends GameShell {
-        static state: number = ClientMainState.LOADING;
+    static state: number = ClientMainState.LOADING;
     static loopCycle: number = 0;
 
     static nodeId: number = 10;
@@ -439,9 +439,9 @@ export class Client extends GameShell {
     private projectiles: LinkList<ClientProj> = new LinkList();
     private spotanims: LinkList<MapSpotAnim> = new LinkList();
 
-    private statEffectiveLevel: Int32Array = new Int32Array(Skill.count);
-    private statBaseLevel: Int32Array = new Int32Array(Skill.count);
-    private statXP: Int32Array = new Int32Array(Skill.count);
+    private statEffectiveLevel: Int32Array = new Int32Array(Skills.count);
+    private statBaseLevel: Int32Array = new Int32Array(Skills.count);
+    private statXP: Int32Array = new Int32Array(Skills.count);
 
     private oneMouseButton: number = 0;
     private isMenuOpen: boolean = false;
@@ -7525,7 +7525,7 @@ export class Client extends GameShell {
                 this.statBaseLevel[stat] = 1;
 
                 for (let i: number = 0; i < 98; i++) {
-                    if (xp >= Skill.skillxp[i]) {
+                    if (xp >= Skills.skillxp[i]) {
                         this.statBaseLevel[stat] = i + 2;
                     }
                 }
@@ -11809,7 +11809,7 @@ export class Client extends GameShell {
                     register = this.var[script[pc++]];
                 } else if (opcode === 6) {
                     // stat_xp_remaining {skill}
-                    register = Skill.skillxp[this.statBaseLevel[script[pc++]] - 1];
+                    register = Skills.skillxp[this.statBaseLevel[script[pc++]] - 1];
                 } else if (opcode === 7) {
                     register = ((this.var[script[pc++]] * 100) / 46875) | 0;
                 } else if (opcode === 8) {
@@ -11817,8 +11817,8 @@ export class Client extends GameShell {
                     register = this.localPlayer?.combatLevel || 0;
                 } else if (opcode === 9) {
                     // total level
-                    for (let i: number = 0; i < Skill.count; i++) {
-                        if (Skill.used[i]) {
+                    for (let i: number = 0; i < Skills.count; i++) {
+                        if (Skills.used[i]) {
                             register += this.statBaseLevel[i];
                         }
                     }

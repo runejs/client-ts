@@ -4,6 +4,12 @@ export default class HashTable<T extends Linkable> {
     readonly bucketCount: number;
     readonly buckets: Linkable[];
 
+    iteratorBucket = 0;
+    iteratorCursor: Linkable | null = null;
+
+    searchKey = 0n;
+    searchCursor: Linkable | null = null;
+
     constructor(size: number) {
         this.buckets = new Array(size);
         this.bucketCount = size;
@@ -40,5 +46,48 @@ export default class HashTable<T extends Linkable> {
         }
         node.next.prev = node;
         node.key = key;
+    }
+
+    search() {
+        this.iteratorBucket = 0;
+        return this.findnext();
+    }
+
+    findnext() {
+        if (this.iteratorBucket > 0 && this.buckets[this.iteratorBucket - 1] !== this.iteratorCursor) {
+            const node = this.iteratorCursor!;
+            this.iteratorCursor = node.next;
+            return node;
+        }
+
+        while (this.bucketCount > this.iteratorBucket) {
+            const node = this.buckets[this.iteratorBucket++].next!;
+            if (this.buckets[this.iteratorBucket - 1] !== node) {
+                this.iteratorCursor = node.next;
+                return node;
+            }
+        }
+
+        return null;
+    }
+
+    searchnext() {
+        if (this.searchCursor === null) {
+            return null;
+        }
+
+        const node = this.buckets[Number(this.searchKey & BigInt(this.bucketCount - 1))];
+        while (this.searchCursor !== node) {
+            if (this.searchCursor!.key === this.searchKey) {
+                const node2 = this.searchCursor;
+                this.searchCursor = this.searchCursor!.next;
+                return node2;
+            }
+
+            this.searchCursor = this.searchCursor!.next;
+        }
+
+        this.searchCursor = null;
+        return null;
     }
 }
