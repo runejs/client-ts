@@ -5243,6 +5243,10 @@ export class Client extends GameShell {
             this.p12?.drawStringRight('Fps:' + GameShell.fps, x, y, colour);
             y += 15;
 
+            // custom
+            this.p12?.drawStringRight('Lps:' + GameShell.lps, x, y, Colour.YELLOW);
+            y += 15;
+
             let memoryUsage = -1;
             if (typeof window.performance['memory' as keyof Performance] !== 'undefined') {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any

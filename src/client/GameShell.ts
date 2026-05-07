@@ -18,6 +18,7 @@ export default abstract class GameShell {
     static deltime = 20;
     static mindel = 1;
     static fps = 0;
+    static lps = 0; // custom
     static timer: Timer | null = null;
     static drawTime: number[] = new TypedArray1d(32, 0);
     static drawPos = 0;
@@ -98,8 +99,6 @@ export default abstract class GameShell {
                 canvas.style.touchAction = 'none';
             }
 
-            // Preventing mouse events from bubbling up to the context menu in the browser for our canvas.
-            // This may need to be hooked up to our own context menu in the future.
             canvas.oncontextmenu = (e: MouseEvent): void => {
                 e.preventDefault();
             };
@@ -114,11 +113,12 @@ export default abstract class GameShell {
             GameShell.timer = Timer.create();
             GameShell.timer.init();
             while (GameShell.killtime === 0 || MonotonicTime.currentTime() < GameShell.killtime) {
-                const frameStart: number = performance.now();
                 GameShell.updateCount = await GameShell.timer.count(GameShell.deltime, GameShell.mindel);
+
                 for (let i: number = 0; i < GameShell.updateCount; i++) {
                     await this.mainloopwrapper();
                 }
+
                 await this.mainredrawwrapper();
             }
         } catch {
@@ -192,22 +192,32 @@ export default abstract class GameShell {
         const time: number = MonotonicTime.currentTime();
         const previous: number = GameShell.drawTime[GameShell.drawPos];
         GameShell.drawTime[GameShell.drawPos] = time;
+        GameShell.drawPos = (GameShell.drawPos + 1) & 0x1f;
+
         if (previous !== 0 && previous < time) {
             const delta: number = time - previous;
             GameShell.fps = (((delta >> 1) + 32000) / delta) | 0;
         }
-        GameShell.drawPos = (GameShell.drawPos + 1) & 0x1f;
+
         if (GameShell.redrawNum++ > 50) {
             GameShell.redrawNum -= 50;
             GameShell.fullredraw = true;
         }
+
         await this.mainredraw();
     }
 
     protected async mainloopwrapper(): Promise<void> {
         const time: number = MonotonicTime.currentTime();
+        const previous: number = GameShell.updateTime[GameShell.updatePos];
         GameShell.updateTime[GameShell.updatePos] = time;
         GameShell.updatePos = (GameShell.updatePos + 1) & 0x1f;
+
+        if (previous !== 0 && previous < time) {
+            const delta: number = time - previous;
+            GameShell.lps = (((delta >> 1) + 32000) / delta) | 0;
+        }
+
         GameShell.focus = GameShell.focus_in;
         await this.mainloop();
     }
