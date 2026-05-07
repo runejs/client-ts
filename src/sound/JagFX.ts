@@ -2,41 +2,14 @@ import Packet from '#/io/Packet.js';
 import type Js5 from '#/js5/Js5.js';
 
 import Tone from '#/sound/Tone.js';
+import Wave from '#/sound/Wave.js';
 
 import { TypedArray1d } from '#/util/Arrays.js';
 
 export default class JagFX {
-    static synth: (JagFX | null)[] = new TypedArray1d(1000, null);
-    static delays: Int32Array = new Int32Array(1000);
-
-    static waveBytes: Uint8Array = new Uint8Array(22050 * 20);
-    static waveBuffer: Packet = new Packet(this.waveBytes);
-
     tones: (Tone | null)[] = new TypedArray1d(10, null);
     loopBegin: number = 0;
     loopEnd: number = 0;
-
-    static init(buf: Packet): void {
-        while (true) {
-            const id = buf.g2();
-            if (id === 65535) {
-                break;
-            }
-
-            this.synth[id] = new JagFX();
-            this.synth[id].load(buf);
-            this.delays[id] = this.synth[id].optimiseStart();
-        }
-    }
-
-    static generate(id: number, loopCount: number): Packet | null {
-        const sound = this.synth[id];
-        if (!sound) {
-            return null;
-        }
-
-        return sound.getWave(loopCount);
-    }
 
     static load(cache: Js5, id: number): JagFX | null {
         const data = cache.getFile(0, id);
@@ -95,87 +68,37 @@ export default class JagFX {
         return start;
     }
 
-    getWave(loopCount: number): Packet {
-        const length = this.makeSound(loopCount);
-        JagFX.waveBuffer.pos = 0;
-        JagFX.waveBuffer.p4(0x52494646); // "RIFF" ChunkID
-        JagFX.waveBuffer.ip4(length + 36); // ChunkSize
-        JagFX.waveBuffer.p4(0x57415645); // "WAVE" format
-        JagFX.waveBuffer.p4(0x666d7420); // "fmt " chunk id
-        JagFX.waveBuffer.ip4(16); // chunk size
-        JagFX.waveBuffer.ip2(1); // audio format
-        JagFX.waveBuffer.ip2(1); // num channels
-        JagFX.waveBuffer.ip4(22050); // sample rate
-        JagFX.waveBuffer.ip4(22050); // byte rate
-        JagFX.waveBuffer.ip2(1); // block align
-        JagFX.waveBuffer.ip2(8); // bits per sample
-        JagFX.waveBuffer.p4(0x64617461); // "data"
-        JagFX.waveBuffer.ip4(length);
-        JagFX.waveBuffer.pos += length;
-        return JagFX.waveBuffer;
+    method708(): Int8Array {
+        let var1 = 0;
+        for (let var2 = 0; var2 < 10; var2++) {
+            if (this.tones[var2] !== null && this.tones[var2]!.length + this.tones[var2]!.start > var1) {
+                var1 = this.tones[var2]!.length + this.tones[var2]!.start;
+            }
+        }
+        if (var1 === 0) {
+            return new Int8Array(0);
+        }
+        const var3 = ((var1 * 22050) / 1000) | 0;
+        const var4 = new Int8Array(var3);
+        for (let var5 = 0; var5 < 10; var5++) {
+            if (this.tones[var5] !== null) {
+                const var6 = ((this.tones[var5]!.length * 22050) / 1000) | 0;
+                const var7 = ((this.tones[var5]!.start * 22050) / 1000) | 0;
+                const var8 = this.tones[var5]!.generate(var6, this.tones[var5]!.length);
+                for (let var9 = 0; var9 < var6; var9++) {
+                    let var10 = (var8[var9] >> 8) + var4[var7 + var9];
+                    if ((var10 + 128 & 0xFFFFFF00) !== 0) {
+                        var10 = var10 >> 31 ^ 0x7F;
+                    }
+                    var4[var7 + var9] = var10;
+                }
+            }
+        }
+        return var4;
     }
 
-    private makeSound(loopCount: number): number {
-        let duration = 0;
-        for (let i = 0; i < 10; i++) {
-            const tone = this.tones[i];
-            if (tone !== null && tone.length + tone.start > duration) {
-                duration = tone.length + tone.start;
-            }
-        }
-
-        if (duration === 0) {
-            return 0;
-        }
-
-        let sampleCount = ((duration * 22050) / 1000) | 0;
-        let loopStart = ((this.loopBegin * 22050) / 1000) | 0;
-        let loopStop = ((this.loopEnd * 22050) / 1000) | 0;
-
-        if (loopStart < 0 || loopStop < 0 || loopStop > sampleCount || loopStart >= loopStop) {
-            loopCount = 0;
-        }
-
-        let totalSampleCount = sampleCount + (loopStop - loopStart) * (loopCount - 1);
-        for (let sample = 44; sample < totalSampleCount + 44; sample++) {
-            JagFX.waveBytes[sample] = -128;
-        }
-
-        for (let i = 0; i < 10; i++) {
-            const tone = this.tones[i];
-            if (tone !== null) {
-                const toneSampleCount = ((tone.length * 22050) / 1000) | 0;
-                const start = ((tone.start * 22050) / 1000) | 0;
-                const samples = tone.generate(toneSampleCount, tone.length);
-
-                for (let sample = 0; sample < toneSampleCount; sample++) {
-                    JagFX.waveBytes[sample + start + 44] += ((samples[sample] >> 8) << 24) >> 24;
-                }
-            }
-        }
-
-        if (loopCount > 1) {
-            loopStart += 44;
-            loopStop += 44;
-            sampleCount += 44;
-            totalSampleCount += 44;
-
-            const endOffset = totalSampleCount - sampleCount;
-            for (let sample = sampleCount - 1; sample >= loopStop; sample--) {
-                JagFX.waveBytes[sample + endOffset] = JagFX.waveBytes[sample];
-            }
-
-            for (let loop = 1; loop < loopCount; loop++) {
-                const offset = (loopStop - loopStart) * loop;
-
-                for (let sample = loopStart; sample < loopStop; sample++) {
-                    JagFX.waveBytes[sample + offset] = JagFX.waveBytes[sample];
-                }
-            }
-
-            totalSampleCount -= 44;
-        }
-
-        return totalSampleCount;
+    toWave(): Wave {
+        const var1 = this.method708();
+        return new Wave(22050, var1, ((this.loopBegin * 22050) / 1000) | 0, ((this.loopEnd * 22050) / 1000) | 0);
     }
 }

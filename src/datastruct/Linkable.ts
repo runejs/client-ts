@@ -3,6 +3,10 @@ export default class Linkable {
     next: Linkable | null = null;
     prev: Linkable | null = null;
 
+    isLinked(): boolean {
+        return this.prev !== null;
+    }
+
     unlink(): void {
         if (this.prev != null) {
             this.prev.next = this.next;

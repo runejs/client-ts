@@ -1,4 +1,4 @@
-import { playWave, setWaveVolume } from '#3rdparty/audio.js';
+import '#3rdparty/audio.js';
 
 import ClientBuild from '#/client/ClientBuild.js';
 import { ClientCode } from '#/client/ClientCode.js';
@@ -75,7 +75,10 @@ import Huffman from '#/wordfilter/Huffman.js';
 import BgSound from '#/sound/BgSound.js';
 import JagFX from '#/sound/JagFX.js';
 import MidiManager from '#/sound/MidiManager.js';
+import Mixer from '#/sound/Mixer.js';
 import PcmPlayer from '#/sound/PcmPlayer.js';
+import WaveStream from '#/sound/WaveStream.js';
+import WebPcmPlayer from '#/sound/WebPcmPlayer.js';
 import PacketBit from '#/io/PacketBit.js';
 
 const CLIENT_VERSION = 435;
@@ -111,6 +114,7 @@ export class Client extends GameShell {
     static memServer: boolean = true;
     static lowMem: boolean = false;
     static midiVolume: number = 255;
+    static soundMixer: Mixer | null = null;
 
     static cyclelogic1: number = 0;
     static cyclelogic2: number = 0;
@@ -551,17 +555,12 @@ export class Client extends GameShell {
     private nextMusicDelay: number = 0;
 
     private waveVolume: number = 127;
-    private ambientVolume: number = 0;
+    private ambientVolume: number = 127;
     private ambientEnabled: boolean = true;
     private waveCount: number = 0;
     private waveIds: Int32Array = new Int32Array(50);
     private waveLoops: Int32Array = new Int32Array(50);
     private waveDelay: Int32Array = new Int32Array(50);
-    private lastWaveId: number = -1;
-    private lastWaveLoops: number = -1;
-    private lastWaveLength: number = 0;
-    private lastWaveStartTime: number = 0;
-
     private cinemaCam: boolean = false;
     private camShake: boolean[] = new TypedArray1d(5, false);
     private camShakeAxis: Int32Array = new Int32Array(5);
@@ -809,6 +808,8 @@ export class Client extends GameShell {
             }
         } else if (this.loadingStep === 45) {
             PcmPlayer.init(null, !Client.lowMem);
+            PcmPlayer.field217 = new WebPcmPlayer();
+            Client.soundMixer = Mixer.method993(null, null);
             TitleScreen.loadPos = 35;
             TitleScreen.loadString = 'Prepared sound engine';
             this.loadingStep = 50;
@@ -3680,7 +3681,7 @@ export class Client extends GameShell {
         for (let wave: number = 0; wave < this.waveCount; wave++) {
             this.waveDelay[wave]--;
             if (this.waveDelay[wave] >= -10) {
-                if (this.waveDelay[wave] < 0 && this.jagFX) {
+                if (this.waveDelay[wave] < 0 && this.jagFX && Client.soundMixer !== null) {
                     const sound = JagFX.load(this.jagFX, this.waveIds[wave]);
                     if (sound === null) {
                         continue;
@@ -3690,13 +3691,11 @@ export class Client extends GameShell {
                         continue;
                     }
 
-                    const buf = sound.getWave(this.waveLoops[wave]);
-                    if (performance.now() + ((buf.pos / 22) | 0) > this.lastWaveStartTime + ((this.lastWaveLength / 22) | 0)) {
-                        this.lastWaveLength = buf.pos;
-                        this.lastWaveStartTime = performance.now();
-                        this.lastWaveId = this.waveIds[wave];
-                        this.lastWaveLoops = this.waveLoops[wave];
-                        await playWave(buf.data.slice(0, buf.pos));
+                    const var10 = sound.toWave();
+                    const var11 = WaveStream.newRatePercent(var10, this.waveVolume);
+                    if (var11 !== null) {
+                        var11.setLoopCount(this.waveLoops[wave] - 1);
+                        Client.soundMixer.playStream(var11);
                     }
                     this.waveDelay[wave] = -100;
                 }
@@ -11983,8 +11982,6 @@ export class Client extends GameShell {
             } else if (value === 4) {
                 this.waveVolume = 0;
             }
-
-            setWaveVolume(this.waveVolume === 0 ? Number.NEGATIVE_INFINITY : 20 * Math.log10(this.waveVolume / 127));
         } else if (clientcode === 5) {
             this.oneMouseButton = value;
         } else if (clientcode === 6) {
@@ -11996,19 +11993,15 @@ export class Client extends GameShell {
             this.bankArrangeMode = value;
         } else if (clientcode === 10) {
             if (value === 0) {
-                this.ambientVolume = 0;
-                this.ambientEnabled = true;
+                this.ambientVolume = 127;
             } else if (value === 1) {
-                this.ambientVolume = -4;
-                this.ambientEnabled = true;
+                this.ambientVolume = 96;
             } else if (value === 2) {
-                this.ambientVolume = -8;
-                this.ambientEnabled = true;
+                this.ambientVolume = 64;
             } else if (value === 3) {
-                this.ambientVolume = -12;
-                this.ambientEnabled = true;
+                this.ambientVolume = 32;
             } else if (value === 4) {
-                this.ambientEnabled = false;
+                this.ambientVolume = 0;
             }
         }
     }

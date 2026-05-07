@@ -1,5 +1,4 @@
-import { playWaveStream } from '#3rdparty/audio.js';
-
+import { Client } from '#/client/Client.js';
 import LocType from '#/config/LocType.js';
 
 import Linkable from '#/datastruct/Linkable.js';
@@ -7,41 +6,39 @@ import LinkList from '#/datastruct/LinkList.js';
 
 import type Js5 from '#/js5/Js5.js';
 import JagFX from '#/sound/JagFX.js';
-
-type WaveHandle = {
-    ended: boolean;
-    setVolume(value: number): void;
-    stop(): void;
-};
+import WaveStream from '#/sound/WaveStream.js';
 
 export default class BgSound extends Linkable {
     static soundlist: LinkList<BgSound> = new LinkList();
     static jagFX: Js5 | null = null;
-    static ambientVolume: number = 0;
+    static ambientVolume: number = 127;
     static ambientEnabled: boolean = true;
 
     level: number = 0;
     field417: number = 0;
     field420: number = -1;
     range: number = 0;
-    continuousStream: WaveHandle | null = null;
+    continuousStream: WaveStream | null = null;
     field425: number = 0;
     field426: number = 0;
     random: Int32Array | null = null;
     field430: number = 0;
-    randomStream: WaveHandle | null = null;
+    randomStream: WaveStream | null = null;
     multiloc: LocType | null = null;
     field435: number = 0;
     field436: number = 0;
     randomSoundTimer: number = 0;
 
-    private continuousPending: boolean = false;
-    private randomPending: boolean = false;
-
     static reset(): void {
         for (let sound: BgSound | null = this.soundlist.head(); sound !== null; sound = this.soundlist.next()) {
-            sound.stopContinuous();
-            sound.stopRandom();
+            if (sound.continuousStream !== null) {
+                Client.soundMixer?.stopStream(sound.continuousStream);
+                sound.continuousStream = null;
+            }
+            if (sound.randomStream !== null) {
+                Client.soundMixer?.stopStream(sound.randomStream);
+                sound.randomStream = null;
+            }
         }
         this.soundlist.clear();
     }
@@ -89,28 +86,54 @@ export default class BgSound extends Linkable {
                     distance += sound.field426 - z;
                 }
 
-                if (sound.range < distance - 64 || !this.ambientEnabled || sound.level !== level) {
-                    sound.stopContinuous();
-                    sound.stopRandom();
+                if (sound.range < distance - 64 || this.ambientVolume === 0 || sound.level !== level) {
+                    if (sound.continuousStream !== null) {
+                        Client.soundMixer?.stopStream(sound.continuousStream);
+                        sound.continuousStream = null;
+                    }
+                    if (sound.randomStream !== null) {
+                        Client.soundMixer?.stopStream(sound.randomStream);
+                        sound.randomStream = null;
+                    }
                 } else {
                     distance -= 64;
                     if (distance < 0) {
                         distance = 0;
                     }
-                    const volume = Math.pow(10, this.ambientVolume / 20) * ((sound.range - distance) / sound.range);
+                    const volume = (((sound.range - distance) * this.ambientVolume) / sound.range) | 0;
                     if (sound.continuousStream !== null) {
-                        sound.continuousStream.setVolume(volume);
-                    } else if (!sound.continuousPending && sound.field420 >= 0) {
-                        sound.startContinuous(volume);
+                        sound.continuousStream.method582(volume);
+                    } else if (sound.field420 >= 0 && Client.soundMixer !== null && BgSound.jagFX !== null) {
+                        const var7 = JagFX.load(BgSound.jagFX, sound.field420);
+                        if (var7 !== null) {
+                            const var8 = var7.toWave();
+                            const var9 = WaveStream.newRatePercent(var8, volume);
+                            if (var9 !== null) {
+                                var9.setLoopCount(-1);
+                                Client.soundMixer.playStream(var9);
+                                sound.continuousStream = var9;
+                            }
+                        }
                     }
 
                     if (sound.randomStream !== null) {
-                        sound.randomStream.setVolume(volume);
-                        if (sound.randomStream.ended) {
+                        sound.randomStream.method582(volume);
+                        if (!sound.randomStream.isRamping()) {
                             sound.randomStream = null;
                         }
-                    } else if (!sound.randomPending && sound.random !== null && (sound.randomSoundTimer -= delta) <= 0) {
-                        sound.startRandom(volume);
+                    } else if (sound.random !== null && (sound.randomSoundTimer -= delta) <= 0 && Client.soundMixer !== null && BgSound.jagFX !== null) {
+                        const soundId = sound.random[(sound.random.length * Math.random()) | 0];
+                        const var11 = JagFX.load(BgSound.jagFX, soundId);
+                        if (var11 !== null) {
+                            const var12 = var11.toWave();
+                            const var13 = WaveStream.newRatePercent(var12, volume);
+                            if (var13 !== null) {
+                                var13.setLoopCount(0);
+                                Client.soundMixer.playStream(var13);
+                                sound.randomSoundTimer = sound.field435 + (((sound.field425 - sound.field435) * Math.random()) | 0);
+                                sound.randomStream = var13;
+                            }
+                        }
                     }
                 }
             }
@@ -141,82 +164,9 @@ export default class BgSound extends Linkable {
             this.field420 = loc.bgsound_sound;
             this.random = loc.bgsound_random;
         }
-        if (this.field420 !== oldSound) {
-            this.stopContinuous();
-        }
-    }
-
-    private startContinuous(volume: number): void {
-        if (BgSound.jagFX === null) {
-            return;
-        }
-
-        const soundId = this.field420;
-        const sound = JagFX.load(BgSound.jagFX, soundId);
-        if (sound === null) {
-            return;
-        }
-        const buf = sound.getWave(1);
-
-        const data = buf.data.slice(0, buf.pos);
-        this.continuousPending = true;
-        void playWaveStream(data, volume, true).then((stream: WaveHandle) => {
-            if (!this.continuousPending || this.field420 !== soundId) {
-                stream.stop();
-                return;
-            }
-            this.continuousPending = false;
-            this.continuousStream = stream;
-        }).catch(() => {
-            this.continuousPending = false;
-        });
-    }
-
-    private startRandom(volume: number): void {
-        if (BgSound.jagFX === null) {
-            return;
-        }
-
-        const random = this.random;
-        if (random === null) {
-            return;
-        }
-
-        const soundId = random[(random.length * Math.random()) | 0];
-        const sound = JagFX.load(BgSound.jagFX, soundId);
-        if (sound === null) {
-            return;
-        }
-        const buf = sound.getWave(1);
-
-        const data = buf.data.slice(0, buf.pos);
-        this.randomPending = true;
-        void playWaveStream(data, volume, false).then((stream: WaveHandle) => {
-            if (!this.randomPending) {
-                stream.stop();
-                return;
-            }
-            this.randomPending = false;
-            this.randomSoundTimer = this.field435 + (((this.field425 - this.field435) * Math.random()) | 0);
-            this.randomStream = stream;
-        }).catch(() => {
-            this.randomPending = false;
-        });
-    }
-
-    private stopContinuous(): void {
-        this.continuousPending = false;
-        if (this.continuousStream !== null) {
-            this.continuousStream.stop();
+        if (this.field420 !== oldSound && this.continuousStream !== null) {
+            Client.soundMixer?.stopStream(this.continuousStream);
             this.continuousStream = null;
-        }
-    }
-
-    private stopRandom(): void {
-        this.randomPending = false;
-        if (this.randomStream !== null) {
-            this.randomStream.stop();
-            this.randomStream = null;
         }
     }
 }
