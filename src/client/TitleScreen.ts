@@ -10,7 +10,7 @@ import Pix32 from '#/graphics/Pix32.js';
 import PixFont from '#/graphics/PixFont.js';
 import PixLoader from '#/graphics/PixLoader.js';
 import PixMap from '#/graphics/PixMap.js';
-import MidiManager from '#/sound/MidiManager.js';
+import MidiManager from '#/midi2/MidiManager.js';
 import { arraycopy } from '#/util/JsUtil.js';
 import type Js5 from '#/js5/Js5.js';
 import type Js5Loader from '#/js5/Js5Loader.js';
@@ -197,9 +197,9 @@ export default class TitleScreen {
         TitleScreen.loginUser = '';
         TitleScreen.loginscreen = 0;
         if (Client.midiVolume === 0 || Client.lowMem) {
-            MidiManager.method672();
+            MidiManager.stopWithFade();
         } else if (Client.songs) {
-            MidiManager.method679(Client.songs, 'scape main', '', Client.midiVolume);
+            MidiManager.playNamed(Client.songs, 'scape main', '', Client.midiVolume);
         }
         // todo: Js5Net.sendLoginLogoutPacket here
         GameShell.fullredraw = true;
@@ -233,7 +233,7 @@ export default class TitleScreen {
         TitleScreen.flameBuffer1 = null;
         TitleScreen.flameBuffer2 = null;
         TitleScreen.flameBuffer3 = null;
-        MidiManager.method672();
+        MidiManager.stopWithFade();
         TitleScreen.open = false;
     }
 

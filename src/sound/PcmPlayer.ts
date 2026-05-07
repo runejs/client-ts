@@ -1,4 +1,4 @@
-import MidiStream from '#/sound/MidiStream.js';
+import MidiStream from '#/midi2/MidiStream.js';
 import PcmPlayerBase from '#/sound/PcmPlayerBase.js';
 import PcmStream from '#/sound/PcmStream.js';
 
@@ -34,14 +34,14 @@ export default abstract class PcmPlayer extends PcmPlayerBase {
     }
 
     static init(arg0: unknown, arg1: boolean): boolean {
-        return MidiStream.method734(arg0, arg1);
+        return MidiStream.init(arg0, arg1);
     }
 
     static unload(): void {
         PcmPlayer.samples = null;
     }
 
-    static shutdown(): void {
+    static loop(): void {
         if (PcmPlayer.field217 === null) {
             return;
         }

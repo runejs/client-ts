@@ -74,7 +74,7 @@ import Huffman from '#/wordfilter/Huffman.js';
 
 import BgSound from '#/sound/BgSound.js';
 import JagFX from '#/sound/JagFX.js';
-import MidiManager from '#/sound/MidiManager.js';
+import MidiManager from '#/midi2/MidiManager.js';
 import Mixer from '#/sound/Mixer.js';
 import PcmPlayer from '#/sound/PcmPlayer.js';
 import WaveStream from '#/sound/WaveStream.js';
@@ -1612,8 +1612,8 @@ export class Client extends GameShell {
         this.loopCycle++;
         Client.loopCycle = this.loopCycle;
         await this.serviceNetClient();
-        MidiManager.method680();
-        PcmPlayer.shutdown();
+        MidiManager.loop();
+        PcmPlayer.loop();
         ClientKeyboardListener.loop();
         ClientMouseListener.loop();
 
@@ -1706,7 +1706,7 @@ export class Client extends GameShell {
         this.js5Net.close();
         this.js5Stream?.close();
         this.js5Stream = null;
-        MidiManager.method674();
+        MidiManager.unload();
         PcmPlayer.method967();
     }
 
@@ -2740,7 +2740,7 @@ export class Client extends GameShell {
         }
 
         BgSound.reset();
-        MidiManager.method672();
+        MidiManager.stopWithFade();
         this.nextMidiSong = -1;
         this.nextMusicDelay = 0;
     }
@@ -7730,7 +7730,7 @@ export class Client extends GameShell {
                 if (songId === -1 && this.nextMusicDelay === 0) {
                     MidiManager.stop();
                 } else if (this.nextMidiSong != songId && Client.midiVolume !== 0 && !Client.lowMem && this.nextMusicDelay === 0 && Client.songs) {
-                    MidiManager.method670(Client.midiVolume, songId, Client.songs, 0);
+                    MidiManager.playGroup(Client.midiVolume, songId, Client.songs, 0);
                 }
 
                 this.nextMidiSong = songId;
