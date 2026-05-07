@@ -4,6 +4,7 @@ import ClientBuild from '#/client/ClientBuild.js';
 import { ClientCode } from '#/client/ClientCode.js';
 import ClientKeyboardListener from '#/client/ClientKeyboardListener.js';
 import ClientMouseListener from '#/client/ClientMouseListener.js';
+import type { ClientPointerEventRecord } from '#/client/ClientMouseListener.js';
 import GameShell from '#/client/GameShell.js';
 import { MiniMenuAction } from '#/client/MiniMenuAction.js';
 import MobileKeyboard from '#/client/MobileKeyboard.js';
@@ -1616,6 +1617,7 @@ export class Client extends GameShell {
         PcmPlayer.loop();
         ClientKeyboardListener.loop();
         ClientMouseListener.loop();
+        this.processPointerInput(ClientMouseListener.drainPointerEvents());
 
         if (Client.state === ClientMainState.LOADING) {
             await this.mainLoad();
@@ -12851,13 +12853,35 @@ export class Client extends GameShell {
     private dragging: boolean = false;
     private panning: boolean = false;
 
-    override pointerDown(x: number, y: number, e: PointerEvent) {
+    private processPointerInput(events: readonly ClientPointerEventRecord[]): void {
+        for (const event of events) {
+            if (event.kind === 'down') {
+                this.processPointerDown(event);
+            } else if (event.kind === 'up') {
+                this.processPointerUp(event);
+            } else if (event.kind === 'enter') {
+                this.processPointerEnter(event);
+            } else if (event.kind === 'leave') {
+                this.processPointerLeave(event);
+            } else if (event.kind === 'cancel') {
+                this.processPointerCancel(event);
+            } else if (event.kind === 'move') {
+                this.processPointerMove(event);
+            }
+        }
+    }
+
+    private processPointerDown(event: ClientPointerEventRecord): void {
+        const x = event.x;
+        const y = event.y;
+
         if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && !this.exceedsGrabThreshold(20)) {
+            this.clearPendingPointerClick();
             MobileKeyboard.captureMouseDown(x, y);
             return;
         }
 
-        if (e.pointerType !== 'mouse') {
+        if (event.pointerType !== 'mouse') {
             // custom: touchscreen support
             // we don't acknowledge the first press as a click, instead we interpret the user's gesture on release
 
@@ -12869,9 +12893,9 @@ export class Client extends GameShell {
             ClientMouseListener.mouseY = y;
             ClientMouseListener.mouseButton = 0;
 
-            this.sx = this.nx = this.mx = e.screenX | 0;
-            this.sy = this.ny = this.my = e.screenY | 0;
-            this.ttime = e.timeStamp;
+            this.sx = this.nx = this.mx = event.screenX | 0;
+            this.sy = this.ny = this.my = event.screenY | 0;
+            this.ttime = event.timeStamp;
 
             this.startedInGame = this.insideGame();
             this.startedInSide = this.insideSide();
@@ -12879,22 +12903,17 @@ export class Client extends GameShell {
         }
     }
 
-    override mouseUp(x: number, y: number, e: MouseEvent) {
-        ClientMouseListener.idleTimer = 0;
-        ClientMouseListener.mouseButton = 0;
+    private processPointerUp(event: ClientPointerEventRecord): void {
+        const x = event.x;
+        const y = event.y;
 
-        // custom: up event comes before and potentially without move event
-        ClientMouseListener.mouseX = x;
-        ClientMouseListener.mouseY = y;
-    }
-
-    override pointerUp(x: number, y: number, e: PointerEvent) {
         if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && !this.exceedsGrabThreshold(20)) {
+            this.clearPendingPointerClick();
             MobileKeyboard.captureMouseUp(x, y);
             return;
         }
 
-        if (e.pointerType !== 'mouse') {
+        if (event.pointerType !== 'mouse') {
             // custom: touchscreen support
             // we don't acknowledge the first press as a click, instead we interpret the user's gesture on release
 
@@ -12912,17 +12931,12 @@ export class Client extends GameShell {
             } else if (this.panning) {
                 // ignore up events if the player was moving the camera
                 this.panning = false;
-
-                // release all arrow keys
-                ClientKeyboardListener.keyHeld[96] = 0;
-                ClientKeyboardListener.keyHeld[97] = 0;
-                ClientKeyboardListener.keyHeld[98] = 0;
-                ClientKeyboardListener.keyHeld[99] = 0;
+                this.releaseCameraKeys();
                 return;
             } else {
                 if (!MobileKeyboard.isDisplayed() && this.insideMobileInput()) {
                     // show keyboard when tapping in an input area
-                    MobileKeyboard.show(x, y, e.clientX, e.clientY);
+                    MobileKeyboard.show(x, y, event.clientX, event.clientY);
                 } else if (MobileKeyboard.isDisplayed() && !MobileKeyboard.isWithinCanvasKeyboard(x, y)) {
                     // hide keyboard when tapping outside of an input area
                     MobileKeyboard.hide();
@@ -12934,7 +12948,7 @@ export class Client extends GameShell {
                 ClientMouseListener.nextMouseClickY = y;
                 ClientMouseListener.nextMouseClickTime = performance.now();
 
-                const longPress: boolean = e.timeStamp >= this.ttime + 500;
+                const longPress: boolean = event.timeStamp >= this.ttime + 500;
                 if (longPress) {
                     ClientMouseListener.nextMouseClickButton = 2;
                     ClientMouseListener.mouseButton = 2;
@@ -12951,11 +12965,11 @@ export class Client extends GameShell {
         }
     }
 
-    override pointerEnter(x: number, y: number, e: PointerEvent) {
-        if (e.pointerType === 'mouse') {
-            ClientMouseListener.mouseX = x;
-            ClientMouseListener.mouseY = y;
-        } else {
+    private processPointerEnter(event: ClientPointerEventRecord): void {
+        const x = event.x;
+        const y = event.y;
+
+        if (event.pointerType !== 'mouse') {
             // custom: touchscreen support
 
             ClientMouseListener.idleTimer = 0;
@@ -12966,17 +12980,17 @@ export class Client extends GameShell {
             ClientMouseListener.mouseY = y;
             ClientMouseListener.mouseButton = 0;
 
-            this.sx = this.nx = this.mx = e.screenX | 0;
-            this.sy = this.ny = this.my = e.screenY | 0;
-            this.ttime = e.timeStamp;
+            this.sx = this.nx = this.mx = event.screenX | 0;
+            this.sy = this.ny = this.my = event.screenY | 0;
+            this.ttime = event.timeStamp;
 
             this.startedInGame = this.insideGame();
             this.startedInSide = this.insideSide();
         }
     }
 
-    override pointerLeave(e: PointerEvent) {
-        if (e.pointerType === 'mouse') {
+    private processPointerLeave(event: ClientPointerEventRecord): void {
+        if (event.pointerType === 'mouse') {
             ClientMouseListener.idleTimer = 0;
             ClientMouseListener.mouseX = -1;
             ClientMouseListener.mouseY = -1;
@@ -12989,28 +13003,31 @@ export class Client extends GameShell {
         } else {
             // custom: touchscreen support
             ClientMouseListener.idleTimer = 0;
-
-            // release all arrow keys
-            ClientKeyboardListener.keyHeld[96] = 0;
-            ClientKeyboardListener.keyHeld[97] = 0;
-            ClientKeyboardListener.keyHeld[98] = 0;
-            ClientKeyboardListener.keyHeld[99] = 0;
+            this.releaseCameraKeys();
         }
     }
 
-    override pointerMove(x: number, y: number, e: PointerEvent) {
-        if (e.pointerType === 'mouse') {
+    private processPointerCancel(event: ClientPointerEventRecord): void {
+        if (event.pointerType !== 'mouse') {
             ClientMouseListener.idleTimer = 0;
-            ClientMouseListener.mouseX = x;
-            ClientMouseListener.mouseY = y;
-        } else {
+            this.dragging = false;
+            this.panning = false;
+            this.releaseCameraKeys();
+        }
+    }
+
+    private processPointerMove(event: ClientPointerEventRecord): void {
+        if (event.pointerType !== 'mouse') {
+            const x = event.x;
+            const y = event.y;
+
             // custom: touchscreen support
             ClientMouseListener.idleTimer = 0;
             ClientMouseListener.mouseX = x;
             ClientMouseListener.mouseY = y;
 
-            this.nx = e.screenX | 0;
-            this.ny = e.screenY | 0;
+            this.nx = event.screenX | 0;
+            this.ny = event.screenY | 0;
 
             if (this.dragging) {
                 // no-op
@@ -13056,13 +13073,18 @@ export class Client extends GameShell {
         }
     }
 
-    // all mouse logic is done above, this is for controlling canvas behaviors
-    override touchStart(e: TouchEvent) {
-        if (e.touches.length < 2 || this.dragging) {
-            // 1 touch - prevent natural browser behavior
-            // 2+ touches - allow scrolling/zooming
-            e.preventDefault();
-        }
+    private releaseCameraKeys(): void {
+        ClientKeyboardListener.keyHeld[96] = 0;
+        ClientKeyboardListener.keyHeld[97] = 0;
+        ClientKeyboardListener.keyHeld[98] = 0;
+        ClientKeyboardListener.keyHeld[99] = 0;
+    }
+
+    private clearPendingPointerClick(): void {
+        ClientMouseListener.nextMouseClickX = -1;
+        ClientMouseListener.nextMouseClickY = -1;
+        ClientMouseListener.nextMouseClickButton = 0;
+        ClientMouseListener.mouseButton = 0;
     }
 
     private exceedsGrabThreshold(size: number) {

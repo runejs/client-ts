@@ -1,5 +1,22 @@
 import { canvas } from '#/graphics/Canvas.js';
 
+export type ClientPointerEventKind = 'down' | 'up' | 'move' | 'enter' | 'leave' | 'cancel';
+
+export interface ClientPointerEventRecord {
+    readonly kind: ClientPointerEventKind;
+    readonly pointerType: string;
+    readonly x: number;
+    readonly y: number;
+    readonly screenX: number;
+    readonly screenY: number;
+    readonly clientX: number;
+    readonly clientY: number;
+    readonly button: number;
+    readonly buttons: number;
+    readonly metaKey: boolean;
+    readonly timeStamp: number;
+}
+
 export default class ClientMouseListener {
     static instance: ClientMouseListener | null = new ClientMouseListener();
     static idleTimer: number = 0;
@@ -18,38 +35,51 @@ export default class ClientMouseListener {
     static mouseClickButton: number = 0;
     static mouseClickTime: number = 0;
 
-    private static readonly mouseenter = (event: MouseEvent): void => ClientMouseListener.instance?.mouseEntered(event);
-    private static readonly mouseleave = (event: MouseEvent): void => ClientMouseListener.instance?.mouseExited(event);
+    private static readonly maxPointerEvents: number = 64;
+    private static readonly pointerEvents: ClientPointerEventRecord[] = [];
+    private static readonly touchActions: WeakMap<HTMLElement, string> = new WeakMap();
+
+    private static readonly pointerdown = (event: PointerEvent): void => ClientMouseListener.instance?.pointerDown(event);
+    private static readonly pointerup = (event: PointerEvent): void => ClientMouseListener.instance?.pointerUp(event);
+    private static readonly pointermove = (event: PointerEvent): void => ClientMouseListener.instance?.pointerMove(event);
+    private static readonly pointerenter = (event: PointerEvent): void => ClientMouseListener.instance?.pointerEnter(event);
+    private static readonly pointerleave = (event: PointerEvent): void => ClientMouseListener.instance?.pointerLeave(event);
+    private static readonly pointercancel = (event: PointerEvent): void => ClientMouseListener.instance?.pointerCancel(event);
     private static readonly blur = (event: FocusEvent): void => ClientMouseListener.instance?.focusLost(event);
     private static readonly focus = (event: FocusEvent): void => ClientMouseListener.instance?.focusGained(event);
-    private static readonly mousedown = (event: MouseEvent): void => ClientMouseListener.instance?.mousePressed(event);
-    private static readonly mouseup = (event: MouseEvent): void => ClientMouseListener.instance?.mouseReleased(event);
-    private static readonly mousemove = (event: MouseEvent): void => ClientMouseListener.instance?.mouseMoved(event);
-    private static readonly mouseclick = (event: MouseEvent): void => ClientMouseListener.instance?.mouseClicked(event);
-    private static readonly touchstart = (event: TouchEvent): void => ClientMouseListener.instance?.touchStart(event);
+    private static readonly click = (event: MouseEvent): void => ClientMouseListener.instance?.mouseClicked(event);
 
     static addListeners(target: HTMLElement): void {
-        target.addEventListener('mousedown', ClientMouseListener.mousedown, false);
-        target.addEventListener('mouseup', ClientMouseListener.mouseup, false);
-        target.addEventListener('click', ClientMouseListener.mouseclick, false);
-        target.addEventListener('mousemove', ClientMouseListener.mousemove, false);
-        target.addEventListener('mouseenter', ClientMouseListener.mouseenter, false);
-        target.addEventListener('mouseleave', ClientMouseListener.mouseleave, false);
+        ClientMouseListener.touchActions.set(target, target.style.touchAction);
+        target.style.touchAction = 'pinch-zoom';
+
+        target.addEventListener('pointerdown', ClientMouseListener.pointerdown, false);
+        target.addEventListener('pointerup', ClientMouseListener.pointerup, false);
+        target.addEventListener('pointermove', ClientMouseListener.pointermove, false);
+        target.addEventListener('pointerenter', ClientMouseListener.pointerenter, false);
+        target.addEventListener('pointerleave', ClientMouseListener.pointerleave, false);
+        target.addEventListener('pointercancel', ClientMouseListener.pointercancel, false);
+        target.addEventListener('click', ClientMouseListener.click, false);
         target.addEventListener('blur', ClientMouseListener.blur, false);
         target.addEventListener('focus', ClientMouseListener.focus, false);
-        target.addEventListener('touchstart', ClientMouseListener.touchstart, { passive: false });
     }
 
     static removeListeners(target: HTMLElement): void {
-        target.removeEventListener('mousedown', ClientMouseListener.mousedown, false);
-        target.removeEventListener('mouseup', ClientMouseListener.mouseup, false);
-        target.removeEventListener('click', ClientMouseListener.mouseclick, false);
-        target.removeEventListener('mousemove', ClientMouseListener.mousemove, false);
-        target.removeEventListener('mouseenter', ClientMouseListener.mouseenter, false);
-        target.removeEventListener('mouseleave', ClientMouseListener.mouseleave, false);
+        target.removeEventListener('pointerdown', ClientMouseListener.pointerdown, false);
+        target.removeEventListener('pointerup', ClientMouseListener.pointerup, false);
+        target.removeEventListener('pointermove', ClientMouseListener.pointermove, false);
+        target.removeEventListener('pointerenter', ClientMouseListener.pointerenter, false);
+        target.removeEventListener('pointerleave', ClientMouseListener.pointerleave, false);
+        target.removeEventListener('pointercancel', ClientMouseListener.pointercancel, false);
+        target.removeEventListener('click', ClientMouseListener.click, false);
         target.removeEventListener('blur', ClientMouseListener.blur, false);
         target.removeEventListener('focus', ClientMouseListener.focus, false);
-        target.removeEventListener('touchstart', ClientMouseListener.touchstart);
+
+        const touchAction = ClientMouseListener.touchActions.get(target);
+        if (touchAction !== undefined) {
+            target.style.touchAction = touchAction;
+            ClientMouseListener.touchActions.delete(target);
+        }
     }
 
     static shutdown(): void {
@@ -79,57 +109,33 @@ export default class ClientMouseListener {
         ClientMouseListener.idleTimer = value;
     }
 
-    mouseEntered(event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
-            const pos = ClientMouseListener.getMousePos(event);
-            ClientMouseListener.nextMouseX = pos.x;
-            ClientMouseListener.nextMouseY = pos.y;
+    static drainPointerEvents(): readonly ClientPointerEventRecord[] {
+        return ClientMouseListener.pointerEvents.splice(0);
+    }
+
+    pointerDown(event: PointerEvent): void {
+        this.recordPointerEvent('down', event);
+
+        if (event.pointerType !== 'mouse') {
+            try {
+                (event.currentTarget as HTMLElement | null)?.setPointerCapture(event.pointerId);
+            } catch (_e) {
+                // ignore capture failures from cancelled or unsupported pointers
+            }
         }
-    }
 
-    mouseExited(_event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
-            ClientMouseListener.nextMouseX = -1;
-            ClientMouseListener.nextMouseY = -1;
-        }
-    }
-
-    focusLost(_event: FocusEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.nextMouseButton = 0;
-        }
-    }
-
-    mouseDragged(event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
-            const pos = ClientMouseListener.getMousePos(event);
-            ClientMouseListener.nextMouseX = pos.x;
-            ClientMouseListener.nextMouseY = pos.y;
-        }
-    }
-
-    focusGained(_event: FocusEvent): void {
-    }
-
-    mousePressed(event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
+        if (event.pointerType === 'mouse') {
             const pos = ClientMouseListener.getMousePos(event);
             ClientMouseListener.nextMouseClickX = pos.x;
             ClientMouseListener.nextMouseClickY = pos.y;
             ClientMouseListener.nextMouseClickTime = performance.now();
-            if (event.button === 2 || event.metaKey) {
-                ClientMouseListener.nextMouseClickButton = 2;
-                ClientMouseListener.nextMouseButton = 2;
-            } else {
-                ClientMouseListener.nextMouseClickButton = 1;
-                ClientMouseListener.nextMouseButton = 1;
-            }
+
+            const button = event.button === 2 || event.metaKey ? 2 : 1;
+            ClientMouseListener.nextMouseClickButton = button;
+            ClientMouseListener.nextMouseButton = button;
         }
-        if (event.button === 2) {
+
+        if (event.button === 2 || event.pointerType !== 'mouse') {
             event.preventDefault();
         }
     }
@@ -140,32 +146,112 @@ export default class ClientMouseListener {
         }
     }
 
-    mouseMoved(event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
-            const pos = ClientMouseListener.getMousePos(event);
-            ClientMouseListener.nextMouseX = pos.x;
-            ClientMouseListener.nextMouseY = pos.y;
-        }
-    }
+    pointerUp(event: PointerEvent): void {
+        this.recordPointerEvent('up', event);
+        this.releasePointerCapture(event);
 
-    mouseReleased(event: MouseEvent): void {
-        if (ClientMouseListener.instance) {
-            ClientMouseListener.idleTimer = 0;
+        if (event.pointerType === 'mouse') {
             ClientMouseListener.nextMouseButton = 0;
         }
-        if (event.button === 2) {
+
+        if (event.button === 2 || event.pointerType !== 'mouse') {
             event.preventDefault();
         }
     }
 
-    touchStart(event: TouchEvent): void {
-        if (event.touches.length < 2) {
+    pointerMove(event: PointerEvent): void {
+        this.recordPointerEvent('move', event);
+
+        if (event.pointerType !== 'mouse') {
             event.preventDefault();
         }
     }
 
-    private static getMousePos(event: MouseEvent): { x: number; y: number } {
+    pointerEnter(event: PointerEvent): void {
+        this.recordPointerEvent('enter', event);
+    }
+
+    pointerLeave(event: PointerEvent): void {
+        this.recordPointerEvent('leave', event);
+
+        if (event.pointerType === 'mouse') {
+            ClientMouseListener.nextMouseX = -1;
+            ClientMouseListener.nextMouseY = -1;
+            ClientMouseListener.nextMouseClickX = -1;
+            ClientMouseListener.nextMouseClickY = -1;
+            ClientMouseListener.nextMouseClickButton = 0;
+            ClientMouseListener.nextMouseButton = 0;
+        }
+
+        if (event.pointerType !== 'mouse') {
+            event.preventDefault();
+        }
+    }
+
+    pointerCancel(event: PointerEvent): void {
+        this.recordPointerEvent('cancel', event);
+        this.releasePointerCapture(event);
+
+        if (event.pointerType === 'mouse') {
+            ClientMouseListener.nextMouseButton = 0;
+        } else {
+            event.preventDefault();
+        }
+    }
+
+    focusLost(_event: FocusEvent): void {
+        if (ClientMouseListener.instance) {
+            ClientMouseListener.nextMouseButton = 0;
+        }
+    }
+
+    focusGained(_event: FocusEvent): void {
+    }
+
+    private releasePointerCapture(event: PointerEvent): void {
+        if (event.pointerType === 'mouse') {
+            return;
+        }
+
+        try {
+            (event.currentTarget as HTMLElement | null)?.releasePointerCapture(event.pointerId);
+        } catch (_e) {
+            // ignore capture failures from already-released pointers
+        }
+    }
+
+    private recordPointerEvent(kind: ClientPointerEventKind, event: PointerEvent): void {
+        if (!ClientMouseListener.instance) {
+            return;
+        }
+
+        ClientMouseListener.idleTimer = 0;
+        const pos = ClientMouseListener.getMousePos(event);
+        ClientMouseListener.nextMouseX = pos.x;
+        ClientMouseListener.nextMouseY = pos.y;
+
+        const record: ClientPointerEventRecord = Object.freeze({
+            kind,
+            pointerType: event.pointerType,
+            x: pos.x,
+            y: pos.y,
+            screenX: event.screenX | 0,
+            screenY: event.screenY | 0,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            button: event.button,
+            buttons: event.buttons,
+            metaKey: event.metaKey,
+            timeStamp: event.timeStamp
+        });
+
+        ClientMouseListener.pointerEvents.push(record);
+        if (ClientMouseListener.pointerEvents.length > ClientMouseListener.maxPointerEvents) {
+            ClientMouseListener.pointerEvents.shift();
+        }
+    }
+
+    private static getMousePos(event: MouseEvent | PointerEvent): { x: number; y: number } {
         const fixedWidth = canvas.width;
         const fixedHeight = canvas.height;
         const bounds = canvas.getBoundingClientRect();

@@ -226,7 +226,7 @@ try {
         return await proxyHttp(req);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`HTTP proxy error: ${message}`);
+        console.error(`${new URL(req.url).pathname} HTTP proxy error: ${message}`);
         return new Response("Bad Gateway", { status: 502 });
       }
     },

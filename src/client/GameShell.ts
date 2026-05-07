@@ -269,29 +269,6 @@ export default abstract class GameShell {
         await sleep(5); // return a slice of time to the main loop so it can update the progress bar
     }
 
-    // ----
-
-    protected pointerDown(_x: number, _y: number, _e: PointerEvent) {
-    }
-
-    protected mouseUp(_x: number, _y: number, _e: MouseEvent) {
-    }
-
-    protected pointerUp(_x: number, _y: number, _e: PointerEvent) {
-    }
-
-    protected pointerEnter(_x: number, _y: number, _e: PointerEvent) {
-    }
-
-    protected pointerLeave(_e: PointerEvent) {
-    }
-
-    protected pointerMove(_x: number, _y: number, _e: PointerEvent) {
-    }
-
-    protected touchStart(_e: TouchEvent) {
-    }
-
     private onfocus(_e: FocusEvent) {
         GameShell.focus_in = true;
         GameShell.fullredraw = true;
