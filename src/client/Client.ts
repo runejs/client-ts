@@ -216,9 +216,9 @@ export class Client extends GameShell {
     private js5Net: Js5Net = new Js5Net();
     private js5Archives: Js5Loader[] = [];
 
-    private npc: (ClientNpc | null)[] = new TypedArray1d(16384, null);
+    private npc: (ClientNpc | null)[] = new TypedArray1d(32768, null);
     private npcCount: number = 0;
-    private npcIds: Int32Array = new Int32Array(16384);
+    private npcIds: Int32Array = new Int32Array(32768);
 
     private stream: ClientStream | null = null;
     private static prevStream: ClientStream | null = null;
